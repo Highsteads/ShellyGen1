@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PluginConfig>
+
+	<Field id="showDebugInfo" type="checkbox" defaultValue="false">
+		<Label>Debug Logging:</Label>
+	</Field>
+	<Field id="hlpDebug" type="label" fontSize="mini" alignWithControl="true">
+		<Label>Log detailed polling results to the Indigo event log.</Label>
+	</Field>
+
+</PluginConfig>

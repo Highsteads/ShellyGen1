@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Devices>
+
+	<!-- shellyRelay - Shelly 1 on/off relay -->
+	<Device type="relay" id="shellyRelay">
+		<Name>Shelly Relay (Gen 1)</Name>
+		<ConfigUI>
+			<Field id="ip_address" type="textfield" defaultValue="">
+				<Label>IP Address:</Label>
+			</Field>
+			<Field id="hlpIp" type="label" fontSize="mini" alignWithControl="true">
+				<Label>Local IP address of the Shelly 1 device (e.g. 192.168.4.245)</Label>
+			</Field>
+		</ConfigUI>
+	</Device>
+
+	<!-- shellyUniADC - Shelly UNI ADC voltage input (car battery) -->
+	<Device type="sensor" id="shellyUniADC" displayStateId="voltage">
+		<Name>Shelly UNI ADC (Gen 1)</Name>
+		<ConfigUI>
+			<Field id="ip_address" type="textfield" defaultValue="">
+				<Label>IP Address:</Label>
+			</Field>
+			<Field id="hlpIp" type="label" fontSize="mini" alignWithControl="true">
+				<Label>Local IP address of the Shelly UNI device (e.g. 192.168.4.108)</Label>
+			</Field>
+		</ConfigUI>
+		<States>
+			<State id="voltage">
+				<ValueType>Number</ValueType>
+				<TriggerLabel>Battery Voltage</TriggerLabel>
+				<ControlPageLabel>Voltage</ControlPageLabel>
+			</State>
+			<State id="lastUpdate">
+				<ValueType>String</ValueType>
+				<TriggerLabel>Last Update Time</TriggerLabel>
+				<ControlPageLabel>Last Update</ControlPageLabel>
+			</State>
+		</States>
+	</Device>
+
+</Devices>
