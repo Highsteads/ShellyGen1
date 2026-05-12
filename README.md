@@ -5,7 +5,9 @@
 Indigo plugin for Shelly Gen 1 legacy devices — basic relay and UNI ADC support over local HTTP, kept separate from ShellyDirect (Gen 2/3/4) for clarity
 
 **Author:** CliveS & Claude Sonnet 4.6
-**Platform:** Indigo 2025.2 or later, macOS, Python 3.13
+**Platform:** Indigo 2022.1 or later, macOS (Python 3.10+ bundled with Indigo)
+
+*Developed and tested on Indigo 2025.2 / Python 3.13. Older Indigo releases that meet the minimum API version above should also work — the API floor is what Indigo's plugin loader actually checks.*
 **Bundle ID:** `com.clives.indigoplugin.shellyg1`
 **Version:** 1.0
 
