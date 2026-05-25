@@ -59,12 +59,7 @@ class Plugin(indigo.PluginBase):
         else:
             self._ts_filter = None
 
-        if log_startup_banner:
-            log_startup_banner(pluginId, pluginDisplayName, pluginVersion, extras=[
-                ("Supported Devices:", "Shelly 1 relay, Shelly UNI ADC"),
-            ])
-        else:
-            indigo.server.log(f"{pluginDisplayName} v{pluginVersion} starting")
+        # Startup banner moved to showPluginInfo on demand (revised 25-May-2026 per Jay).
 
     # ── Lifecycle ─────────────────────────────────────────────────────
 
