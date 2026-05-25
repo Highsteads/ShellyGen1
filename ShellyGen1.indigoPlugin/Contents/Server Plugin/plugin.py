@@ -5,7 +5,7 @@
 #              Supports: Shelly 1 relay (on/off + pulse), Shelly UNI ADC voltage
 # Author:      CliveS & Claude Opus 4.7
 # Date:        23-05-2026
-# Version:     1.1
+# Version:     1.2
 #
 # v1.1 (23-05-2026): Millisecond timestamp [HH:MM:SS.mmm] prefix on every
 # log line via plugin_utils.install_timestamp_filter() — matches Device
@@ -80,6 +80,15 @@ class Plugin(indigo.PluginBase):
 
     def deviceStopComm(self, dev):
         self.logger.debug(f"deviceStopComm: {dev.name}")
+
+    @staticmethod
+    def didDeviceCommPropertyChange(oldDevice, newDevice):
+        """Restart comm only when the Shelly's IP address changes.
+
+        The HTTP poller targets `ip_address`; nothing else in pluginProps
+        affects the connection.
+        """
+        return oldDevice.pluginProps.get("ip_address") != newDevice.pluginProps.get("ip_address")
 
     def runConcurrentThread(self):
         try:
