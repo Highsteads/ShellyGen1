@@ -3,10 +3,15 @@
 # Filename:    plugin.py
 # Description: Shelly Gen 1 device integration for Indigo
 #              Supports: Shelly 1 relay (on/off + pulse), Shelly UNI ADC voltage
-# Author:      CliveS & Claude Opus 4.7
-# Date:        23-05-2026
-# Version:     1.2
+# Author:      CliveS & Claude Opus 4.8
+# Date:        29-05-2026
+# Version:     1.3
 #
+# v1.3 (29-05-2026): Resilience — one quick retry before a device is declared
+# unreachable, and reachability failures are logged once on the way down plus
+# once on recovery (with an occasional heartbeat) instead of on every poll, so
+# a flaky Shelly Gen 1 / ESP8266 can no longer flood the event log. Device
+# error state is cleared automatically on recovery.
 # v1.1 (23-05-2026): Millisecond timestamp [HH:MM:SS.mmm] prefix on every
 # log line via plugin_utils.install_timestamp_filter() — matches Device
 # Activity Monitor convention. New "Toggle Timestamps in Log" menu item.
@@ -15,6 +20,7 @@ import indigo
 import os as _os
 import sys as _sys
 import json
+import time
 import urllib.request
 import urllib.error
 from datetime import datetime
@@ -32,6 +38,8 @@ except ImportError:
 PLUGIN_ID   = "com.clives.indigoplugin.shellyg1"
 POLL_SECS   = 30
 HTTP_TIMEOUT = 5
+RETRY_DELAY  = 0.5        # seconds before the single retry on a failed GET
+FAIL_REMIND_EVERY = 60    # re-log a still-down device every Nth consecutive fail
 
 
 def log(message, level="INFO"):
@@ -47,12 +55,23 @@ def _http_get(url, timeout=HTTP_TIMEOUT):
         return None
 
 
+def _http_get_retry(url, timeout=HTTP_TIMEOUT):
+    """GET with a single quick retry — absorbs a one-off dropped packet or a
+    momentarily busy ESP8266 web server. Returns body string or None."""
+    body = _http_get(url, timeout)
+    if body is None:
+        time.sleep(RETRY_DELAY)
+        body = _http_get(url, timeout)
+    return body
+
+
 class Plugin(indigo.PluginBase):
 
     def __init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs):
         super().__init__(pluginId, pluginDisplayName, pluginVersion, pluginPrefs)
         self.debug = pluginPrefs.get("showDebugInfo", False)
         self.timestamp_enabled = bool(pluginPrefs.get("timestampEnabled", True))
+        self._fail_state = {}   # {dev.id: consecutive poll-failure count} — log throttling
 
         if install_timestamp_filter:
             self._ts_filter = install_timestamp_filter(self, enabled=self.timestamp_enabled)
@@ -75,6 +94,7 @@ class Plugin(indigo.PluginBase):
 
     def deviceStopComm(self, dev):
         self.logger.debug(f"deviceStopComm: {dev.name}")
+        self._fail_state.pop(dev.id, None)
 
     @staticmethod
     def didDeviceCommPropertyChange(oldDevice, newDevice):
@@ -104,21 +124,46 @@ class Plugin(indigo.PluginBase):
             self._update_adc(dev)
 
     def _fetch_status(self, dev):
-        """Fetch /status from the device. Returns parsed dict or None."""
+        """Fetch /status from the device (one retry). Returns parsed dict or None.
+
+        Reachability failures are logged once on the way down and once on
+        recovery — not on every poll — so a flaky device can't flood the log.
+        The device's UI error state still tracks the live condition.
+        """
         ip = dev.pluginProps.get("ip_address", "").strip()
         if not ip:
             log(f"{dev.name}: no IP address configured", level="WARNING")
             return None
-        body = _http_get(f"http://{ip}/status")
+        body = _http_get_retry(f"http://{ip}/status")
         if body is None:
-            log(f"{dev.name}: no response from {ip}", level="WARNING")
+            self._note_failure(dev, ip)
             dev.setErrorStateOnServer("unreachable")
             return None
         try:
-            return json.loads(body)
+            status = json.loads(body)
         except json.JSONDecodeError:
             log(f"{dev.name}: invalid JSON from {ip}", level="WARNING")
             return None
+        self._note_recovery(dev)
+        return status
+
+    def _note_failure(self, dev, ip):
+        """Count a consecutive poll failure; log only the first and then every
+        FAIL_REMIND_EVERY-th, to keep the log readable during an outage."""
+        fails = self._fail_state.get(dev.id, 0) + 1
+        self._fail_state[dev.id] = fails
+        if fails == 1:
+            log(f"{dev.name}: no response from {ip} — suppressing repeats until it recovers", level="WARNING")
+        elif fails % FAIL_REMIND_EVERY == 0:
+            log(f"{dev.name}: still no response from {ip} ({fails} consecutive failed polls)", level="WARNING")
+
+    def _note_recovery(self, dev):
+        """Log recovery and clear the error state if the device had been failing."""
+        if self._fail_state.get(dev.id, 0):
+            log(f"{dev.name}: responding again after {self._fail_state[dev.id]} failed poll(s)", level="INFO")
+            self._fail_state[dev.id] = 0
+        if dev.errorState:
+            dev.setErrorStateOnServer("")
 
     def _update_relay(self, dev):
         status = self._fetch_status(dev)
@@ -165,7 +210,7 @@ class Plugin(indigo.PluginBase):
             self._relay_cmd(dev, ip, "toggle")
 
     def _relay_cmd(self, dev, ip, turn):
-        body = _http_get(f"http://{ip}/relay/0?turn={turn}")
+        body = _http_get_retry(f"http://{ip}/relay/0?turn={turn}")
         if body is None:
             log(f"{dev.name}: relay command '{turn}' failed — no response from {ip}", level="ERROR")
             return
@@ -185,7 +230,7 @@ class Plugin(indigo.PluginBase):
         if not ip:
             log(f"{dev.name}: no IP configured", level="ERROR")
             return
-        body = _http_get(f"http://{ip}/relay/0?turn=on&timer=2")
+        body = _http_get_retry(f"http://{ip}/relay/0?turn=on&timer=2")
         if body is None:
             log(f"{dev.name}: pulse failed — no response from {ip}", level="ERROR")
             return
