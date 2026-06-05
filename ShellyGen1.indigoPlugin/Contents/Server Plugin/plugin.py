@@ -5,7 +5,7 @@
 #              Supports: Shelly 1 relay (on/off + pulse), Shelly UNI ADC voltage
 # Author:      CliveS & Claude Opus 4.8
 # Date:        29-05-2026
-# Version:     1.3
+# Version:     1.4
 #
 # v1.3 (29-05-2026): Resilience — one quick retry before a device is declared
 # unreachable, and reachability failures are logged once on the way down plus
@@ -51,7 +51,9 @@ def _http_get(url, timeout=HTTP_TIMEOUT):
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             return resp.read().decode("utf-8")
-    except Exception:
+    except (OSError, UnicodeDecodeError):
+        # OSError covers urllib.error.URLError/HTTPError, socket timeouts and connection
+        # failures; UnicodeDecodeError covers a bad body. Real programming errors propagate.
         return None
 
 
@@ -195,6 +197,14 @@ class Plugin(indigo.PluginBase):
             log(f"{dev.name}: {voltage:.2f} V")
 
     # ── Device actions (on/off/toggle) ────────────────────────────────
+
+    def actionControlSensor(self, action, dev, callerWaitingForResult=None):
+        # shellyUniADC is type="sensor"; without this, a Send Status Request logged
+        # "plugin does not define method actionControlSensor" (seen live 2026-06-05 07:35).
+        if action.sensorAction == indigo.kSensorAction.RequestStatus:
+            self._update_device(dev)
+        else:
+            log(f"{dev.name}: unsupported sensor action {action.sensorAction}", level="WARNING")
 
     def actionControlDevice(self, action, dev, callerWaitingForResult):
         ip = dev.pluginProps.get("ip_address", "").strip()
