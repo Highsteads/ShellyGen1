@@ -9,7 +9,7 @@
 				<Label>IP Address:</Label>
 			</Field>
 			<Field id="hlpIp" type="label" fontSize="mini" alignWithControl="true">
-				<Label>Local IP address of the Shelly 1 device (e.g. 192.168.4.245)</Label>
+				<Label>Local IP address of the Shelly 1 device (e.g. 192.168.1.245)</Label>
 			</Field>
 		</ConfigUI>
 	</Device>
@@ -22,7 +22,7 @@
 				<Label>IP Address:</Label>
 			</Field>
 			<Field id="hlpIp" type="label" fontSize="mini" alignWithControl="true">
-				<Label>Local IP address of the Shelly UNI device (e.g. 192.168.4.108)</Label>
+				<Label>Local IP address of the Shelly UNI device (e.g. 192.168.1.108)</Label>
 			</Field>
 		</ConfigUI>
 		<States>
