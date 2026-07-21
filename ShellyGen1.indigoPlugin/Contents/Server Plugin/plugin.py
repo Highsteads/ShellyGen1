@@ -4,8 +4,19 @@
 # Description: Shelly Gen 1 device integration for Indigo
 #              Supports: Shelly 1 relay (on/off + pulse), Shelly UNI ADC voltage
 # Author:      CliveS & Claude Opus 4.8
-# Date:        29-05-2026
-# Version:     1.4.1
+# Date:        21-07-2026
+# Version:     1.4.2
+#
+# v1.4.2 (21-07-2026): shared plugin_utils.py refreshed to v1.3 — the
+# estate-wide propagation of the four Appliance Monitor deep-review fixes.
+# * install_timestamp_filter() is idempotent — a second call used to stack a
+#   second filter, so every log line came out with two timestamps.
+# * `import indigo` is soft, so the module imports outside the Indigo host and
+#   can be exercised by offline tests.
+# * A malformed log call keeps its arguments in the log instead of dropping
+#   them, so a %-placeholder mismatch is visible.
+# * New shared as_bool() — a pref re-serialised as the string "false" is
+#   truthy, which is exactly the wrong answer.
 #
 # v1.4.1 (21-07-2026): LOG-LEVEL FIX. indigo.server.log(level=...) wants a Python
 # logging INT — a STRING is silently ignored and the line logs as plain Info.
