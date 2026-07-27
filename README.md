@@ -9,7 +9,25 @@ Indigo plugin for older Shelly Gen 1 devices — relay and UNI ADC control over 
 
 *Developed and tested on Indigo 2025.2 / Python 3.13. Older Indigo releases that meet the minimum API version above should also work — the API floor is what Indigo's plugin loader actually checks.*
 **Bundle ID:** `com.clives.indigoplugin.shellyg1`
-**Version:** 1.4
+**Version:** 1.4.2
+
+---
+
+## Features
+
+- Talks to each Shelly straight over the local network with plain HTTP — no cloud account, no MQTT broker, nothing in between
+- Polls every device every 30 seconds and keeps its Indigo state in step
+- **Pulse Relay (2 seconds)** action — the relay closes and opens again on the Shelly's own timer, so a garage-door opener still gets its momentary contact even if Indigo is busy
+- One quick retry before a device is called unreachable, and a device that has gone away is logged once on the way down and once on the way back rather than on every poll, so a flaky ESP8266 cannot flood the event log
+- The Indigo error state clears itself when the device answers again
+- Millisecond log timestamps, with a menu item to turn the prefix off
+
+## Device types
+
+| Indigo device type | Shelly hardware | What you get |
+|--------------------|-----------------|--------------|
+| **Shelly Relay (Gen 1)** (`shellyRelay`) | Shelly 1 and other Gen 1 relays | On, off and toggle from the standard Indigo controls, plus the Pulse Relay action |
+| **Shelly UNI ADC (Gen 1)** (`shellyUniADC`) | Shelly UNI | The voltage on the UNI's analogue input as the device's display state — a car or leisure battery, say — with the time it was last read |
 
 ---
 
