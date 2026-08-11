@@ -93,6 +93,20 @@ ShellyGen1.indigoPlugin/
 └── Contents/Server Plugin/IndigoSecrets_example.py   ← credential template
 ```
 
+## Changelog
+
+**v1.4.3** — **Added the missing support link.** Every Indigo plugin is meant to carry a web address inside its bundle — it is what the "About" item in the Plugins menu opens. This one had the entry but left it blank, so that menu item went nowhere. It now points at this repository. Nothing else changed.
+
+**v1.4.2** — Refreshed the shared helper the plugin logs through. Three things it fixes here: log lines no longer come out with two timestamps if the filter is installed twice, a log call with a mismatched placeholder keeps its arguments so you can still see what it was trying to say, and a saved setting holding the word "false" is now read as off rather than on.
+
+**v1.4.1** — **Warnings and errors were logging as ordinary information.** The log helper passed the level through as a word where Indigo wanted a number, and a word is quietly ignored. Every warning and error the plugin raised had been appearing as a plain Info line, so the red and amber entries people rely on when something goes wrong never existed. They do now.
+
+**v1.3** — A Shelly that misses one poll gets a second chance before the plugin calls it unreachable, and a device that stays away is logged once on the way down and once on recovery rather than on every poll. A flaky ESP8266 can no longer bury the event log. Error state clears by itself when the device comes back.
+
+**v1.1** — Every log line now carries a millisecond timestamp, matching the other plugins here, with a menu item to turn it off.
+
+Earlier releases are not recorded.
+
 ## Authors & licence
 
 Vibed into existence by **CliveS**, who knew what he wanted, argued until he got it, and tested it on a real house. Typed at inhuman speed by **Claude** (Anthropic), who mostly did as it was told.
