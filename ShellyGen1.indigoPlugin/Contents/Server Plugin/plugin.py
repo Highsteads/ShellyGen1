@@ -5,7 +5,21 @@
 #              Supports: Shelly 1 relay (on/off + pulse), Shelly UNI ADC voltage
 # Author:      CliveS & Claude Opus 4.8
 # Date:        21-07-2026
-# Version:     1.4.3
+# Version:     1.5.0
+#
+# v1.5.0 (15-08-2026): new per-device "Often Unpowered" setting. A car that has
+# driven off, or an appliance plug switched off at the wall, is unreachable as
+# its NORMAL state — but every failed poll logged a WARNING, so the Qashqai's
+# UNI produced amber lines every time the car left the drive.
+# Tick the box and those are reported at INFO instead.
+# * A per-device SETTING, not a list of device names in the code. A hardcoded
+#   exemption rots: the device it names can die for real with nobody hearing,
+#   and it silently covers any future device that happens to match.
+# * Quietening is NOT hiding. The failure is still counted, the line still
+#   appears, and setErrorStateOnServer("unreachable") still runs — so the
+#   device still shows red in the device list and DeviceHealthMonitor still
+#   sees it. A thing allowed to go silent is a thing whose death nobody
+#   notices.
 #
 # v1.4.3 (08-08-2026): REQUIRED Info.plist KEY. `CFBundleURLTypes` was PRESENT but
 # EMPTY, so the plugin shipped without the support URL that becomes its
@@ -198,15 +212,39 @@ class Plugin(indigo.PluginBase):
         self._note_recovery(dev)
         return status
 
+    @staticmethod
+    def _expected_absent(dev):
+        """True when the user has said this device is often away or unpowered.
+
+        A per-device setting, deliberately, rather than a list of names in the
+        code. A hardcoded exemption rots: the device it names can die for real
+        and nobody hears, and it silently covers any future device that happens
+        to match. This way the user states the fact about their own kit, and
+        the plugin reports what it sees at a level that matches.
+        """
+        return bool(dev.pluginProps.get("expected_absent", False))
+
     def _note_failure(self, dev, ip):
         """Count a consecutive poll failure; log only the first and then every
-        FAIL_REMIND_EVERY-th, to keep the log readable during an outage."""
+        FAIL_REMIND_EVERY-th, to keep the log readable during an outage.
+
+        For a device marked as often unpowered — a car that has driven off, an
+        appliance plug switched off at the wall — not answering is the NORMAL
+        state, so it is reported at INFO instead. What it is NOT is silent:
+        the failure is still counted, the device still carries its unreachable
+        error state, and the line still appears. Quietening the log must never
+        become hiding the device, because a thing that is allowed to go quiet
+        is a thing whose death nobody notices.
+        """
         fails = self._fail_state.get(dev.id, 0) + 1
         self._fail_state[dev.id] = fails
+        level = "INFO" if self._expected_absent(dev) else "WARNING"
         if fails == 1:
-            log(f"{dev.name}: no response from {ip} — suppressing repeats until it recovers", level="WARNING")
+            log(f"{dev.name}: no response from {ip} — suppressing repeats until it recovers",
+                level=level)
         elif fails % FAIL_REMIND_EVERY == 0:
-            log(f"{dev.name}: still no response from {ip} ({fails} consecutive failed polls)", level="WARNING")
+            log(f"{dev.name}: still no response from {ip} ({fails} consecutive failed polls)",
+                level=level)
 
     def _note_recovery(self, dev):
         """Log recovery and clear the error state if the device had been failing."""

@@ -11,6 +11,12 @@
 			<Field id="hlpIp" type="label" fontSize="mini" alignWithControl="true">
 				<Label>Local IP address of the Shelly 1 device (e.g. 192.168.1.245)</Label>
 			</Field>
+			<Field id="expected_absent" type="checkbox" defaultValue="false">
+				<Label>Often Unpowered:</Label>
+			</Field>
+			<Field id="hlpAbsent" type="label" fontSize="mini" alignWithControl="true">
+				<Label>Tick for a device that is away or switched off much of the time — a car, or an appliance plug that is off at the wall between uses. Not answering is then treated as normal and logged quietly. The device still shows as unreachable in the device list and still carries an error state, so anything watching device health can still see it: this quietens the log, it does not hide the device.</Label>
+			</Field>
 		</ConfigUI>
 	</Device>
 
@@ -23,6 +29,12 @@
 			</Field>
 			<Field id="hlpIp" type="label" fontSize="mini" alignWithControl="true">
 				<Label>Local IP address of the Shelly UNI device (e.g. 192.168.1.108)</Label>
+			</Field>
+			<Field id="expected_absent" type="checkbox" defaultValue="false">
+				<Label>Often Unpowered:</Label>
+			</Field>
+			<Field id="hlpAbsent" type="label" fontSize="mini" alignWithControl="true">
+				<Label>Tick for a device that is away or switched off much of the time — a car, or an appliance plug that is off at the wall between uses. Not answering is then treated as normal and logged quietly. The device still shows as unreachable in the device list and still carries an error state, so anything watching device health can still see it: this quietens the log, it does not hide the device.</Label>
 			</Field>
 		</ConfigUI>
 		<States>

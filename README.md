@@ -95,6 +95,10 @@ ShellyGen1.indigoPlugin/
 
 ## Changelog
 
+**v1.5.0** — New **Often Unpowered** setting on each device. A car that has driven off, or a plug switched off at the wall, is unreachable as its normal state — but every failed poll was logged as a warning. Tick the box and those become ordinary notes instead.
+
+It quietens the log without hiding the device: it still shows as unreachable in the device list and still carries an error state, so anything watching device health can still see it.
+
 **v1.4.3** — **Added the missing support link.** Every Indigo plugin is meant to carry a web address inside its bundle — it is what the "About" item in the Plugins menu opens. This one had the entry but left it blank, so that menu item went nowhere. It now points at this repository. Nothing else changed.
 
 **v1.4.2** — Refreshed the shared helper the plugin logs through. Three things it fixes here: log lines no longer come out with two timestamps if the filter is installed twice, a log call with a mismatched placeholder keeps its arguments so you can still see what it was trying to say, and a saved setting holding the word "false" is now read as off rather than on.
