@@ -9,7 +9,7 @@ Indigo plugin for older Shelly Gen 1 devices — relay and UNI ADC control over 
 
 *Developed and tested on Indigo 2025.2 / Python 3.13. Older Indigo releases that meet the minimum API version above should also work — the API floor is what Indigo's plugin loader actually checks.*
 **Bundle ID:** `com.clives.indigoplugin.shellyg1`
-**Version:** 1.4.2
+**Version:** 1.5.0
 
 ---
 
