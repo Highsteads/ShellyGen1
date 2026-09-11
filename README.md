@@ -9,7 +9,7 @@ Indigo plugin for older Shelly Gen 1 devices — relay and UNI ADC control over 
 
 *Developed and tested on Indigo 2025.2 / Python 3.13. Older Indigo releases that meet the minimum API version above should also work — the API floor is what Indigo's plugin loader actually checks.*
 **Bundle ID:** `com.clives.indigoplugin.shellyg1`
-**Version:** 1.5.0
+**Version:** 1.5.1
 
 ---
 
@@ -94,6 +94,8 @@ ShellyGen1.indigoPlugin/
 ```
 
 ## Changelog
+
+**v1.5.1** — **The bundle now carries the standard GitHub record.** Indigo plugins can carry a small note inside the bundle saying where their source lives on GitHub, spelt the way the Indigo Domotics and community plugins spell it. This one now has it, pointing at this repository. Nothing else changed.
 
 **v1.5.0** — New **Often Unpowered** setting on each device. A car that has driven off, or a plug switched off at the wall, is unreachable as its normal state — but every failed poll was logged as a warning. Tick the box and those become ordinary notes instead.
 

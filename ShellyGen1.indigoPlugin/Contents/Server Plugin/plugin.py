@@ -3,9 +3,13 @@
 # Filename:    plugin.py
 # Description: Shelly Gen 1 device integration for Indigo
 #              Supports: Shelly 1 relay (on/off + pulse), Shelly UNI ADC voltage
-# Author:      CliveS & Claude Opus 4.8
-# Date:        21-07-2026
-# Version:     1.5.0
+# Author:      CliveS & Claude Fable 5.1
+# Date:        11-09-2026
+# Version:     1.5.1
+#
+# v1.5.1 (11-09-2026): GITHUBINFO. The bundle now carries the standard GitHub record
+# (GithubInfo: GithubUser/GithubRepo), as the Indigo Domotics and community plugins do.
+# No behaviour change.
 #
 # v1.5.0 (15-08-2026): new per-device "Often Unpowered" setting. A car that has
 # driven off, or an appliance plug switched off at the wall, is unreachable as
