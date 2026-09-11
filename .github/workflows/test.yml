@@ -24,3 +24,9 @@ jobs:
         run: |
           pip install ruff
           ruff check .
+      # tests/ holds the estate's version-consistency guard (added 11-Sep-2026); until then
+      # this job ran compileall and ruff only.
+      - name: Tests (pytest)
+        run: |
+          pip install pytest
+          python -m pytest tests -q
