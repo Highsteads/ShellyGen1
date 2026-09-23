@@ -3,9 +3,17 @@
 # Filename:    plugin.py
 # Description: Shelly Gen 1 device integration for Indigo
 #              Supports: Shelly 1 relay (on/off + pulse), Shelly UNI ADC voltage
-# Author:      CliveS & Claude Fable 5.1
-# Date:        11-09-2026
-# Version:     1.5.1
+# Author:      CliveS & Claude Fable 5.1; Claude Opus 5.5 (1.5.2)
+# Date:        23-09-2026
+# Version:     1.5.2
+#
+# v1.5.2 (23-09-2026): ONE HISTORY ROW PER READING. _update_adc wrote the voltage
+# and lastUpdate as two separate state updates every 30 s, so SQL Logger stored
+# two rows per poll -- one of them lastUpdate alone (the Qashqai Battery Monitor
+# reached 714,000 rows in five months). The three ADC states now go in one
+# updateStatesOnServer call, and deviceStartComm adds lastUpdate to the device's
+# `sqlLoggerIgnoreStates` shared prop (merged into the user's own list, never
+# narrowing "*"). The voltage history is unchanged.
 #
 # v1.5.1 (11-09-2026): GITHUBINFO. The bundle now carries the standard GitHub record
 # (GithubInfo: GithubUser/GithubRepo), as the Indigo Domotics and community plugins do.
@@ -84,6 +92,10 @@ HTTP_TIMEOUT = 5
 RETRY_DELAY  = 0.5        # seconds before the single retry on a failed GET
 FAIL_REMIND_EVERY = 60    # re-log a still-down device every Nth consecutive fail
 
+# v1.5.2: states rewritten on every poll that carry no history worth keeping.
+# SQL Logger reads the comma-separated `sqlLoggerIgnoreStates` shared prop.
+SQL_LOGGER_CHURN_STATES = ("lastUpdate",)
+
 
 import logging
 
@@ -111,6 +123,22 @@ def _lvl(level):
 
 def log(message, level="INFO"):
     indigo.server.log(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {message}", level=_lvl(level))
+
+
+def merge_sql_logger_ignore(existing, extra=SQL_LOGGER_CHURN_STATES):
+    """Return the new sqlLoggerIgnoreStates value, or None when nothing changes.
+
+    Keeps every entry the user already listed, in their order, and appends the
+    missing churn states. "*" (ignore the whole device) is left as it is.
+    """
+    current = [t.strip() for t in str(existing or "").split(",") if t.strip()]
+    if len(current) == 1 and current[0] == "*":
+        return None
+    have = {t.lower() for t in current}
+    missing = [t for t in extra if t.lower() not in have]
+    if not missing:
+        return None
+    return ", ".join(current + missing)
 
 
 def _http_get(url, timeout=HTTP_TIMEOUT):
@@ -159,7 +187,23 @@ class Plugin(indigo.PluginBase):
 
     def deviceStartComm(self, dev):
         self.logger.debug(f"deviceStartComm: {dev.name}")
+        self._keep_churn_out_of_sql_logger(dev)
         self._update_device(dev)
+
+    def _keep_churn_out_of_sql_logger(self, dev):
+        """v1.5.2: see SQL_LOGGER_CHURN_STATES. Writes only when something is
+        missing, so a restart re-checks every device without rewriting it."""
+        try:
+            shared = dev.sharedProps
+            merged = merge_sql_logger_ignore(shared.get("sqlLoggerIgnoreStates", ""))
+            if merged is None:
+                return
+            shared["sqlLoggerIgnoreStates"] = merged
+            dev.replaceSharedPropsOnServer(shared)
+            self.logger.debug(f"{dev.name}: SQL Logger now skips {merged}")
+        except Exception as exc:
+            log(f"{dev.name}: could not set the SQL Logger ignore list ({exc}); "
+                f"history keeps a row for every poll", level="WARNING")
 
     def deviceStopComm(self, dev):
         self.logger.debug(f"deviceStopComm: {dev.name}")
@@ -280,9 +324,12 @@ class Plugin(indigo.PluginBase):
         except (KeyError, IndexError, TypeError, ValueError):
             log(f"{dev.name}: unexpected ADC status format", level="WARNING")
             return
-        dev.updateStateOnServer("onOffState", True)
-        dev.updateStateOnServer("voltage", voltage, uiValue=f"{voltage:.2f} V")
-        dev.updateStateOnServer("lastUpdate", datetime.now().strftime("%H:%M:%S"))
+        # One call, so SQL Logger stores one history row per reading (v1.5.2).
+        dev.updateStatesOnServer([
+            {"key": "onOffState", "value": True},
+            {"key": "voltage",    "value": voltage, "uiValue": f"{voltage:.2f} V"},
+            {"key": "lastUpdate", "value": datetime.now().strftime("%H:%M:%S")},
+        ])
         dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
         if self.debug:
             log(f"{dev.name}: {voltage:.2f} V")
