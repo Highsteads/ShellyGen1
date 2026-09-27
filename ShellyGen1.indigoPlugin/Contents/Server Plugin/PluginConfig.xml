@@ -8,4 +8,13 @@
 		<Label>Log detailed polling results to the Indigo event log.</Label>
 	</Field>
 
+
+	<Field id="sep1" type="separator"/>
+	<Field id="logActivityToEventLog" type="checkbox" defaultValue="false">
+		<Label>Show Device Activity in the Indigo Event Log:</Label>
+	</Field>
+	<Field id="hlpLogActivity" type="label" fontSize="mini" alignWithControl="true">
+		<Label>Off by default. Every on and off command is written to this plugin's own log file (Indigo's Logs folder). Tick this to have it echoed into the shared Indigo Event Log as well. Warnings and errors always appear in the Event Log, and so does a relay pulse.</Label>
+	</Field>
+
 </PluginConfig>

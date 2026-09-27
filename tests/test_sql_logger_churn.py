@@ -99,14 +99,30 @@ def test_start_comm_adds_last_update_once():
     assert dev.shared_writes == 1
 
 
-def test_a_failed_write_does_not_stop_the_device():
+def test_a_failed_write_does_not_stop_the_device(monkeypatch):
     p = plugin()
     polled = []
     p._update_device = lambda dev: polled.append(dev)
     dev = FakeDev()
+    dev.enabled = True
 
     def boom(props):
         raise RuntimeError("server said no")
     dev.replaceSharedPropsOnServer = boom
+    # v1.5.3: the first poll runs in a thread and looks the device up by id.
+    # Run that thread's work inline so the test sees it.
+    started = []
+
+    class _InlineThread:
+        def __init__(self, target=None, args=(), daemon=None):
+            self._t, self._a = target, args
+
+        def start(self):
+            started.append(self._a)
+            self._t(*self._a)
+
+    monkeypatch.setattr(MOD.threading, "Thread", _InlineThread)
+    monkeypatch.setattr(MOD.indigo, "devices", {dev.id: dev})
     p.deviceStartComm(dev)
+    assert started == [(dev.id,)]
     assert polled == [dev]

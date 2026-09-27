@@ -9,7 +9,7 @@ Indigo plugin for older Shelly Gen 1 devices — relay and UNI ADC control over 
 
 *Developed and tested on Indigo 2025.2 / Python 3.13. Older Indigo releases that meet the minimum API version above should also work — the API floor is what Indigo's plugin loader actually checks.*
 **Bundle ID:** `com.clives.indigoplugin.shellyg1`
-**Version:** 1.5.2
+**Version:** 1.5.3
 
 ---
 
@@ -18,7 +18,7 @@ Indigo plugin for older Shelly Gen 1 devices — relay and UNI ADC control over 
 - Talks to each Shelly straight over the local network with plain HTTP — no cloud account, no MQTT broker, nothing in between
 - Polls every device every 30 seconds and keeps its Indigo state in step
 - **Pulse Relay (2 seconds)** action — the relay closes and opens again on the Shelly's own timer, so a garage-door opener still gets its momentary contact even if Indigo is busy
-- One quick retry before a device is called unreachable, and a device that has gone away is logged once on the way down and once on the way back rather than on every poll, so a flaky ESP8266 cannot flood the event log
+- One quick retry, and three missed checks in a row, before a device is called unreachable; a device that has gone away is logged once on the way down and once on the way back rather than on every poll, so a flaky ESP8266 cannot flood the event log
 - The Indigo error state clears itself when the device answers again
 - Millisecond log timestamps, with a menu item to turn the prefix off
 
@@ -94,6 +94,16 @@ ShellyGen1.indigoPlugin/
 ```
 
 ## Changelog
+
+**v1.5.3** — **A full review, and the fixes that came out of it.**
+- **Polling keeps going whatever happens.** One unexpected error used to stop all polling until the plugin was restarted.
+- **A device that is away no longer holds up start-up.** The first check now runs in the background.
+- **Send Status Request works on a relay.** It used to do nothing.
+- **After a pulse, Indigo shows the relay off again as soon as it opens,** rather than up to 30 seconds later.
+- **The device dialog insists on a real IP address,** and a device without one says so once instead of every 30 seconds.
+- **A device is only called unreachable after three missed checks in a row,** about a minute and a half. A single missed check used to raise a warning, and one flaky garage light raised five in 25 minutes, each back 30 seconds later.
+- **Each on and off goes to the plugin's own log,** with a tick box in the settings to show them in the Indigo Event Log as well. Warnings, errors and relay pulses always appear there.
+- **Last Update shows the date as well as the time,** so a reading taken days ago no longer looks current.
 
 **v1.5.2** — **A voltage reading is now one history row, not two.** Every 30 seconds the UNI voltage monitor saved its voltage and the time of the reading as two separate updates, so SQL Logger kept two rows for each reading, one of them holding nothing but the time. The reading now goes in as a single update, and the plugin tells SQL Logger to skip the time altogether. The voltage history is exactly as before, anything you already told SQL Logger to skip is kept, and existing history is untouched.
 

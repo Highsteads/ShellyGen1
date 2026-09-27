@@ -3,9 +3,25 @@
 # Filename:    plugin.py
 # Description: Shelly Gen 1 device integration for Indigo
 #              Supports: Shelly 1 relay (on/off + pulse), Shelly UNI ADC voltage
-# Author:      CliveS & Claude Fable 5.1; Claude Opus 5.5 (1.5.2)
-# Date:        23-09-2026
-# Version:     1.5.2
+# Author:      CliveS & Claude Fable 5.1; Claude Opus 5.5 (1.5.2, 1.5.3)
+# Date:        27-09-2026
+# Version:     1.5.3
+#
+# v1.5.3 (27-09-2026): FULL REVIEW, the bug fixes.
+# * runConcurrentThread guards every device and every tick; one unexpected error
+#   used to end all polling until a restart.
+# * deviceStartComm polls in a thread: an absent device held up start-up for
+#   over ten seconds.
+# * Send Status Request now works on a relay (RequestStatus was ignored).
+# * Pulse Relay re-reads the relay when the timer ends, so Indigo shows it off
+#   again at once instead of up to 30 seconds later; a deleted device is handled.
+# * validateDeviceConfigUi requires a real IPv4 address; the no-address warning
+#   is said once, not every 30 seconds.
+# * Three polls in a row before a device is called down (and marked with an
+#   error state); a single missed poll raised a WARNING before.
+# * on/off narration goes to the plugin's own log unless the new setting puts it
+#   in the event log; a pulse keeps its event-log line.
+# * lastUpdate carries the date.
 #
 # v1.5.2 (23-09-2026): ONE HISTORY ROW PER READING. _update_adc wrote the voltage
 # and lastUpdate as two separate state updates every 30 s, so SQL Logger stored
@@ -71,6 +87,7 @@ import indigo
 import os as _os
 import sys as _sys
 import json
+import threading
 import time
 import urllib.request
 import urllib.error
@@ -91,6 +108,8 @@ POLL_SECS   = 30
 HTTP_TIMEOUT = 5
 RETRY_DELAY  = 0.5        # seconds before the single retry on a failed GET
 FAIL_REMIND_EVERY = 60    # re-log a still-down device every Nth consecutive fail
+FAIL_WARN_AFTER   = 3     # v1.5.3: consecutive failed polls before a device is called down
+PULSE_REPOLL_SECS = 1.0   # v1.5.3: re-read a pulsed relay this long after its timer ends
 
 # v1.5.2: states rewritten on every poll that carry no history worth keeping.
 # SQL Logger reads the comma-separated `sqlLoggerIgnoreStates` shared prop.
@@ -168,7 +187,11 @@ class Plugin(indigo.PluginBase):
         super().__init__(pluginId, pluginDisplayName, pluginVersion, pluginPrefs)
         self.debug = pluginPrefs.get("showDebugInfo", False)
         self.timestamp_enabled = bool(pluginPrefs.get("timestampEnabled", True))
+        # v1.5.3: routine on/off narration goes to this plugin's own log unless
+        # the user asks for it in the shared event log (the estate rule).
+        self.log_activity = bool(pluginPrefs.get("logActivityToEventLog", False))
         self._fail_state = {}   # {dev.id: consecutive poll-failure count} — log throttling
+        self._no_ip_warned = set()   # device ids already told they have no address
 
         if install_timestamp_filter:
             self._ts_filter = install_timestamp_filter(self, enabled=self.timestamp_enabled)
@@ -188,7 +211,19 @@ class Plugin(indigo.PluginBase):
     def deviceStartComm(self, dev):
         self.logger.debug(f"deviceStartComm: {dev.name}")
         self._keep_churn_out_of_sql_logger(dev)
-        self._update_device(dev)
+        # v1.5.3: the first poll runs off the lifecycle thread. Done inline, a
+        # device that does not answer (the Qashqai when the car is out) held up
+        # plugin start-up for the full timeout and retry, over ten seconds.
+        threading.Thread(target=self._safe_update, args=(dev.id,), daemon=True).start()
+
+    def _safe_update(self, dev_id):
+        """Poll one device by id, never letting an error escape a thread."""
+        try:
+            dev = indigo.devices[dev_id]
+            if dev.enabled:
+                self._update_device(dev)
+        except Exception as exc:
+            self.logger.debug(f"poll of device {dev_id} failed: {exc}")
 
     def _keep_churn_out_of_sql_logger(self, dev):
         """v1.5.2: see SQL_LOGGER_CHURN_STATES. Writes only when something is
@@ -219,11 +254,24 @@ class Plugin(indigo.PluginBase):
         return oldDevice.pluginProps.get("ip_address") != newDevice.pluginProps.get("ip_address")
 
     def runConcurrentThread(self):
+        # v1.5.3: every device and every tick is guarded. Unguarded, one
+        # unexpected error (an Indigo API hiccup, a device deleted mid-loop)
+        # ended the loop, and with it all polling, until the plugin restarted.
         try:
             while True:
-                for dev in indigo.devices.iter("self"):
-                    if dev.enabled:
-                        self._update_device(dev)
+                try:
+                    for dev in indigo.devices.iter("self"):
+                        try:
+                            if dev.enabled:
+                                self._update_device(dev)
+                        except self.StopThread:
+                            raise
+                        except Exception as exc:
+                            log(f"{getattr(dev, 'name', '?')}: poll error: {exc}", level="WARNING")
+                except self.StopThread:
+                    raise
+                except Exception as exc:
+                    log(f"poll loop error: {exc}", level="WARNING")
                 self.sleep(POLL_SECS)
         except self.StopThread:
             pass
@@ -245,12 +293,16 @@ class Plugin(indigo.PluginBase):
         """
         ip = dev.pluginProps.get("ip_address", "").strip()
         if not ip:
-            log(f"{dev.name}: no IP address configured", level="WARNING")
+            # v1.5.3: once, not every 30 seconds for ever.
+            if dev.id not in self._no_ip_warned:
+                self._no_ip_warned.add(dev.id)
+                log(f"{dev.name}: no IP address configured - open the device and enter one",
+                    level="WARNING")
             return None
+        self._no_ip_warned.discard(dev.id)
         body = _http_get_retry(f"http://{ip}/status")
         if body is None:
             self._note_failure(dev, ip)
-            dev.setErrorStateOnServer("unreachable")
             return None
         try:
             status = json.loads(body)
@@ -287,18 +339,29 @@ class Plugin(indigo.PluginBase):
         fails = self._fail_state.get(dev.id, 0) + 1
         self._fail_state[dev.id] = fails
         level = "INFO" if self._expected_absent(dev) else "WARNING"
-        if fails == 1:
-            log(f"{dev.name}: no response from {ip} — suppressing repeats until it recovers",
-                level=level)
+        # v1.5.3: FAIL_WARN_AFTER polls in a row (about 1.5 minutes) before the
+        # device is called down. A single missed poll had raised a WARNING: the
+        # garage light produced five in 25 minutes on 19-09-2026, each answering
+        # again 30 seconds later. The error state waits for the same threshold.
+        if fails < FAIL_WARN_AFTER:
+            self.logger.debug(f"{dev.name}: no response from {ip} (poll {fails}, retrying)")
+        elif fails == FAIL_WARN_AFTER:
+            dev.setErrorStateOnServer("unreachable")
+            log(f"{dev.name}: no response from {ip} for {fails} polls in a row — "
+                f"suppressing repeats until it recovers", level=level)
         elif fails % FAIL_REMIND_EVERY == 0:
             log(f"{dev.name}: still no response from {ip} ({fails} consecutive failed polls)",
                 level=level)
 
     def _note_recovery(self, dev):
-        """Log recovery and clear the error state if the device had been failing."""
-        if self._fail_state.get(dev.id, 0):
-            log(f"{dev.name}: responding again after {self._fail_state[dev.id]} failed poll(s)", level="INFO")
-            self._fail_state[dev.id] = 0
+        """Log recovery and clear the error state if the device had been failing.
+        A recovery is only announced when the loss was (v1.5.3)."""
+        fails = self._fail_state.get(dev.id, 0)
+        if fails >= FAIL_WARN_AFTER:
+            log(f"{dev.name}: responding again after {fails} failed poll(s)", level="INFO")
+        elif fails:
+            self.logger.debug(f"{dev.name}: answered again after {fails} missed poll(s)")
+        self._fail_state[dev.id] = 0
         if dev.errorState:
             dev.setErrorStateOnServer("")
 
@@ -315,6 +378,14 @@ class Plugin(indigo.PluginBase):
         if self.debug:
             log(f"{dev.name}: {'ON' if is_on else 'OFF'}")
 
+    def _log_activity(self, message):
+        """Routine narration: this plugin's own log, or the event log on request.
+        Faults never come through here."""
+        if self.log_activity:
+            self.logger.info(message)
+        else:
+            self.logger.debug(message)
+
     def _update_adc(self, dev):
         status = self._fetch_status(dev)
         if status is None:
@@ -328,7 +399,9 @@ class Plugin(indigo.PluginBase):
         dev.updateStatesOnServer([
             {"key": "onOffState", "value": True},
             {"key": "voltage",    "value": voltage, "uiValue": f"{voltage:.2f} V"},
-            {"key": "lastUpdate", "value": datetime.now().strftime("%H:%M:%S")},
+            # v1.5.3: with the date. A time alone made a two-day-old reading
+            # (the car away) look current.
+            {"key": "lastUpdate", "value": datetime.now().strftime("%d-%m-%Y %H:%M:%S")},
         ])
         dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
         if self.debug:
@@ -356,6 +429,9 @@ class Plugin(indigo.PluginBase):
             self._relay_cmd(dev, ip, "off")
         elif action.deviceAction == indigo.kDeviceAction.Toggle:
             self._relay_cmd(dev, ip, "toggle")
+        elif action.deviceAction == indigo.kDeviceAction.RequestStatus:
+            # v1.5.3: Send Status Request used to do nothing at all on a relay.
+            self._update_device(dev)
 
     def _relay_cmd(self, dev, ip, turn):
         body = _http_get_retry(f"http://{ip}/relay/0?turn={turn}")
@@ -367,23 +443,35 @@ class Plugin(indigo.PluginBase):
         except (json.JSONDecodeError, AttributeError):
             is_on = (turn == "on")
         dev.updateStateOnServer("onOffState", is_on)
-        log(f"{dev.name}: {'ON' if is_on else 'OFF'}")
+        self._log_activity(f'sent "{dev.name}" {"on" if is_on else "off"}')
 
     # ── Custom action: pulse relay ────────────────────────────────────
 
     def pulseRelay(self, action):
         """Turn relay on for 2 seconds then off (on-device Shelly timer)."""
-        dev = indigo.devices[action.deviceId]
+        try:
+            dev = indigo.devices[action.deviceId]
+        except KeyError:
+            log(f"Pulse Relay: device {action.deviceId} no longer exists", level="ERROR")
+            return
         ip  = dev.pluginProps.get("ip_address", "").strip()
         if not ip:
             log(f"{dev.name}: no IP configured", level="ERROR")
             return
-        body = _http_get_retry(f"http://{ip}/relay/0?turn=on&timer=2")
+        seconds = 2
+        body = _http_get_retry(f"http://{ip}/relay/0?turn=on&timer={seconds}")
         if body is None:
             log(f"{dev.name}: pulse failed — no response from {ip}", level="ERROR")
             return
-        log(f"{dev.name}: pulsed ON for 2 seconds")
+        # A pulse moves something in the house (a garage door), so it keeps its
+        # event-log line.
+        log(f"{dev.name}: pulsed ON for {seconds} seconds")
         dev.updateStateOnServer("onOffState", True)
+        # v1.5.3: read it back once the timer has run. Indigo used to show ON
+        # until the next 30-second poll after the relay had already opened.
+        timer = threading.Timer(seconds + PULSE_REPOLL_SECS, self._safe_update, args=(dev.id,))
+        timer.daemon = True
+        timer.start()
 
     # ── Menu ──────────────────────────────────────────────────────────
 
@@ -412,3 +500,18 @@ class Plugin(indigo.PluginBase):
     def closedPrefsConfigUi(self, valuesDict, userCancelled):
         if not userCancelled:
             self.debug = valuesDict.get("showDebugInfo", False)
+            self.log_activity = bool(valuesDict.get("logActivityToEventLog", False))
+
+    def validateDeviceConfigUi(self, valuesDict, typeId, devId):
+        """v1.5.3: an address is required and must look like one. A device saved
+        without one used to log a warning every 30 seconds for ever."""
+        errors = indigo.Dict()
+        ip = str(valuesDict.get("ip_address", "")).strip()
+        parts = ip.split(".")
+        if not ip:
+            errors["ip_address"] = "Enter the Shelly's IP address (e.g. 192.168.1.10)."
+        elif len(parts) != 4 or not all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+            errors["ip_address"] = "That is not an IPv4 address (e.g. 192.168.1.10)."
+        else:
+            valuesDict["ip_address"] = ip
+        return (len(errors) == 0), valuesDict, errors
