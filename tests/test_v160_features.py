@@ -23,10 +23,12 @@ class RelayDev(Dev):
         self.pluginId = MOD.PLUGIN_ID
         self.batches = []
 
-    def updateStatesOnServer(self, kv):
+    def updateStatesOnServer(self, kv, triggerEvents=True, clearErrorState=True):
         self.batches.append(kv)
         for item in kv:
             self.states[item["key"]] = item["value"]
+        if clearErrorState:
+            self.errorState = ""
 
     def replacePluginPropsOnServer(self, props):
         self.pluginProps = dict(props)

@@ -2,7 +2,7 @@
 
 **Switch and watch the older Shelly devices from Indigo, straight over your home network.**
 
-**Version:** 1.6.1 | **Author:** CliveS & Claude | **Needs:** Indigo 2022.1 or later
+**Version:** 1.7.0 | **Author:** CliveS & Claude | **Needs:** Indigo 2022.1 or later
 
 **[Read the full guide](https://highsteads.github.io/ShellyGen1/)** — setting up, what everything means, and what to do when something goes wrong.
 
@@ -45,14 +45,14 @@ The [full guide](https://highsteads.github.io/ShellyGen1/) goes through each ste
 
 ## What's new
 
+**v1.7.0** — A Shelly that has stopped answering stays marked **unreachable** until the plugin has heard from it properly again. Switching it at the wall, or from Indigo, used to clear the mark, so anything watching for failed devices could miss it. A different Shelly found at a device's address goes back to showing **wrong device** after a spell of not answering, rather than **unreachable**.
+
 **v1.6.1** — Fixes from an independent review of 1.6.0.
 - A copied device no longer ends up controlling the original's Shelly.
 - **Last Switched By** only changes when the relay switches, and a switch made by Indigo shows as Indigo.
 - **Plugins → Shelly Gen 1 → Accept Replaced Shellys** takes a new Shelly fitted at the same address as the right one.
 - Changes to the instant-update settings take effect as soon as you click Save.
 - An action you switched off in a Shelly stays off.
-
-**v1.6.0** — Relays tell Indigo the moment they switch, each Shelly is known by the number it was made with, a new **Last Switched By** state and **Switched Outside Indigo** trigger, and **Pulse Relay** takes a length in seconds. If you made a Pulse Relay action with an earlier version, open it once and click OK.
 
 Every version is listed in the [version history](https://highsteads.github.io/ShellyGen1/changelog.html).
 

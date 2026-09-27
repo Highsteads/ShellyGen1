@@ -3,9 +3,19 @@
 # Filename:    plugin.py
 # Description: Shelly Gen 1 device integration for Indigo
 #              Supports: Shelly 1 relay (on/off + pulse), Shelly UNI ADC voltage
-# Author:      CliveS & Claude Fable 5.1; Claude Opus 5.5 (1.5.2 - 1.6.1)
+# Author:      CliveS & Claude Fable 5.1; Claude Opus 5.5 (1.5.2 - 1.7.0)
 # Date:        27-09-2026
-# Version:     1.6.1
+# Version:     1.7.0
+#
+# v1.7.0 (27-09-2026): A DEAD SHELLY KEEPS ITS ERROR STATE. Indigo's state writes
+# clear a device's error unless passed clearErrorState=False. A push, or the
+# reply to a command, wiped "unreachable" while the failure count stood past the
+# point where it is set, so a failed read-back left a dead device looking healthy
+# for good - and Device Health Monitor 2.11.0 reports a dead Gen 1 from exactly
+# that error. Every state write now leaves the error alone; only _note_recovery
+# (a good poll) and Accept Replaced Shellys clear it.
+# * A wrong device that stops answering and comes back shows "wrong device"
+#   again; it used to stay labelled "unreachable".
 #
 # v1.6.1 (27-09-2026): INDEPENDENT REVIEW OF 1.6.0 - fourteen fixes.
 # * A new address in the device dialog forgets the stored MAC, two devices of
@@ -582,9 +592,13 @@ class Plugin(indigo.PluginBase):
                 log(f"{dev.name}: the right device is answering at {ip} again")
             return True
         self._wrong_device[dev.id] = found
+        # v1.7.0: re-asserted whenever it is not already showing. A wrong box
+        # that went quiet became "unreachable", and when it answered again the
+        # label stayed "unreachable" because this was only set with the warning.
+        if getattr(dev, "errorState", "") != "wrong device":
+            dev.setErrorStateOnServer("wrong device")
         if dev.id not in self._wrong_warned:
             self._wrong_warned.add(dev.id)
-            dev.setErrorStateOnServer("wrong device")
             log(f"{dev.name}: {ip} is answering as {found}, not {stored}. Nothing is recorded "
                 f"and no command is sent until the device is found again; looking for it "
                 f"on the network. If you replaced this Shelly, use Plugins -> Shelly Gen 1 "
@@ -701,7 +715,13 @@ class Plugin(indigo.PluginBase):
 
     def _note_recovery(self, dev):
         """Log recovery and clear the error state if the device had been failing.
-        A recovery is only announced when the loss was (v1.5.3)."""
+        A recovery is only announced when the loss was (v1.5.3).
+
+        v1.7.0: the ONLY place a routine fault ("unreachable", "wrong device")
+        is cleared - every state write passes clearErrorState=False. Indigo's
+        writes clear a device's error by default, so a push or a command reply
+        used to wipe it, and Device Health Monitor, which reads the error
+        state, could miss a dead Shelly."""
         fails = self._fail_state.get(dev.id, 0)
         if fails >= FAIL_WARN_AFTER:
             log(f"{dev.name}: responding again after {fails} failed poll(s)", level="INFO")
@@ -749,7 +769,8 @@ class Plugin(indigo.PluginBase):
         if who and (moved or not dev.states.get("lastChangedBy")) \
                 and who != dev.states.get("lastChangedBy"):
             kv.append({"key": "lastChangedBy", "value": who})
-        dev.updateStatesOnServer(kv)
+        # v1.7.0: never clears the error state; only _note_recovery does.
+        dev.updateStatesOnServer(kv, clearErrorState=False)
         if moved and who and who != "Indigo":
             self._log_activity(f'"{dev.name}" turned {"on" if is_on else "off"} by {who}')
             self._fire_trigger("switchedOutsideIndigo", dev.id)
@@ -780,7 +801,7 @@ class Plugin(indigo.PluginBase):
             # v1.5.3: with the date. A time alone made a two-day-old reading
             # (the car away) look current.
             {"key": "lastUpdate", "value": datetime.now().strftime("%d-%m-%Y %H:%M:%S")},
-        ])
+        ], clearErrorState=False)                     # v1.7.0: see _note_recovery
         dev.updateStateImageOnServer(indigo.kStateImageSel.SensorOn)
         if self.debug:
             log(f"{dev.name}: {voltage:.2f} V")
@@ -845,7 +866,9 @@ class Plugin(indigo.PluginBase):
         kv = [{"key": "onOffState", "value": is_on}]
         if bool(dev.states.get("onOffState")) != is_on and dev.states.get("lastChangedBy") != "Indigo":
             kv.append({"key": "lastChangedBy", "value": "Indigo"})
-        dev.updateStatesOnServer(kv)
+        # v1.7.0: a command that got through does not end an outage by itself;
+        # the next good poll decides that (_note_recovery).
+        dev.updateStatesOnServer(kv, clearErrorState=False)
 
     # ── Custom action: pulse relay ────────────────────────────────────
 
@@ -1192,7 +1215,10 @@ class Plugin(indigo.PluginBase):
         self._push_at[dev.id] = time.time()
         if bool(dev.states.get("onOffState")) != is_on:
             self._moved[dev.id] = True
-        dev.updateStateOnServer("onOffState", is_on)
+        # v1.7.0: a push must not clear "unreachable". It cleared the error while
+        # the failure count stood, so if the read-back then failed the error was
+        # never set again and the dead device showed as healthy for good.
+        dev.updateStateOnServer("onOffState", is_on, clearErrorState=False)
         # Read the relay straight back: it says who switched it.
         threading.Thread(target=self._safe_update, args=(dev.id,), daemon=True).start()
         return 200

@@ -56,7 +56,7 @@ class FakeDev:
         self.sharedProps = dict(props)
         self.shared_writes += 1
 
-    def updateStatesOnServer(self, states):
+    def updateStatesOnServer(self, states, **_k):
         self.batches.append(states)
 
     def updateStateOnServer(self, *a, **k):

@@ -35,7 +35,7 @@ The UNI's voltage is read every 30 seconds. SQL Logger keeps a history of the vo
 
 ## When a Shelly cannot be reached
 
-If a Shelly misses three checks in a row, about a minute and a half, the device shows **unreachable** in red in the device list, and the Event Log has one line saying so. When it answers again the red clears and the log says it is back.
+If a Shelly misses three checks in a row, about a minute and a half, the device shows **unreachable** in red in the device list, and the Event Log has one line saying so. When it answers the plugin's next check the red clears and the log says it is back. Switching the relay at the wall or from Indigo does not clear it on its own, because only a proper check shows the Shelly is really back.
 
 If the device is marked **Often Unpowered**, the same thing happens, but the log line is an ordinary note rather than a warning — it is still shown as unreachable, so anything that watches for failed devices still sees it.
 

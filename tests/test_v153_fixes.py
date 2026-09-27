@@ -57,12 +57,17 @@ class Dev:
         self.errorState = text
         self.error_writes.append(text)
 
-    def updateStateOnServer(self, key, value, **k):
+    # As Indigo does: a state write clears the error unless told not to.
+    def updateStateOnServer(self, key, value, clearErrorState=True, **k):
         self.states[key] = value
+        if clearErrorState:
+            self.errorState = ""
 
-    def updateStatesOnServer(self, kv):
+    def updateStatesOnServer(self, kv, triggerEvents=True, clearErrorState=True):
         for item in kv:
             self.states[item["key"]] = item["value"]
+        if clearErrorState:
+            self.errorState = ""
 
 
 class _Log:
@@ -212,7 +217,7 @@ def test_on_off_narration_stays_in_the_plugins_own_log(monkeypatch, logged):
 def test_last_update_carries_the_date(monkeypatch):
     p = plugin()
     dev = types.SimpleNamespace(id=1, name="Qashqai", batches=[], states={},
-                                updateStatesOnServer=lambda kv: dev.batches.append(kv),
+                                updateStatesOnServer=lambda kv, **_k: dev.batches.append(kv),
                                 updateStateImageOnServer=lambda *a: None)
     p._fetch_status = lambda d: {"adcs": [{"voltage": 12.6}]}
     p._update_adc(dev)

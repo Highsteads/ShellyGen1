@@ -7,6 +7,11 @@ nav_order: 9
 
 The newest version is at the top.
 
+## 1.7.0 — 27 September 2026
+
+- **A Shelly that has stopped answering stays marked unreachable** until the plugin has checked it and had a proper answer. Before, switching the relay at the wall or from Indigo cleared the red mark, and if the Shelly then went quiet again it stayed clear, so Device Health Monitor and anything else watching for failed devices could miss a dead Shelly altogether.
+- **A different Shelly at a device's address is shown as the wrong device again** once it answers after a spell away. Before, it stayed marked unreachable, which sent you looking for a Shelly that was there all along.
+
 ## 1.6.1 — 27 September 2026
 
 Fixes from an independent review of 1.6.0.
