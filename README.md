@@ -9,7 +9,7 @@ Indigo plugin for older Shelly Gen 1 devices — relay and UNI ADC control over 
 
 *Developed and tested on Indigo 2025.2 / Python 3.13. Older Indigo releases that meet the minimum API version above should also work — the API floor is what Indigo's plugin loader actually checks.*
 **Bundle ID:** `com.clives.indigoplugin.shellyg1`
-**Version:** 1.6.0
+**Version:** 1.6.1
 
 ---
 
@@ -96,6 +96,14 @@ ShellyGen1.indigoPlugin/
 ```
 
 ## Changelog
+
+**v1.6.1** — **Fixes from an independent review of 1.6.0.**
+- **A copied device no longer goes back to the original's Shelly.** Giving a device a new address in its dialog now clears the Shelly it was tied to, two devices of the same kind cannot share an address, and the search for a lost device never moves it onto another device's address.
+- **Last Switched By holds.** It is only updated when the relay actually switches, and it said "another app" half a minute after every command from Indigo before.
+- **A replaced Shelly can be accepted** from Plugins -> Shelly Gen 1 -> Accept Replaced Shellys. Before, a new unit at the same address was refused for good.
+- **Push settings apply straight away,** with no reload, and switching push off takes the plugin's addresses back off the relays while keeping anyone else's.
+- **Actions you switched off in the Shelly are left alone,** and a full action says which address it dropped.
+- **A switch at the wall can no longer be overwritten by an older reading** arriving a moment later, and a disabled device ignores pushes.
 
 **v1.6.0** — **New features from the review.**
 - **Instant updates from relays.** Each relay is set to tell Indigo the moment it switches, so a change at the wall switch or in the Shelly app shows straight away instead of within 30 seconds. The plugin adds its own address to the relay's on and off actions and keeps any others you have set there. A push is only believed if it comes from that relay's own address. Set the Indigo Server IP in the plugin settings, or INDIGO_SERVER_IP in IndigoSecrets.py.

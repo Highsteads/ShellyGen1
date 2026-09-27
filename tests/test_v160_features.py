@@ -32,6 +32,16 @@ class RelayDev(Dev):
         self.pluginProps = dict(props)
 
 
+class _Devs(dict):
+    """indigo.devices as the code uses it: [id] and iter()."""
+
+    def __init__(self, devs):
+        super().__init__({d.id: d for d in devs})
+
+    def iter(self, *a):
+        return list(self.values())
+
+
 @pytest.fixture
 def logged(monkeypatch):
     lg = _Log()
@@ -79,6 +89,8 @@ def test_ensure_push_writes_both_slots_and_keeps_other_urls(monkeypatch, logged)
     sent = []
 
     def fake_get(url, timeout=None):
+        if url.endswith("/shelly"):
+            return json.dumps({"mac": "8CAAB5056390"})
         if url.endswith("/settings/actions"):
             return json.dumps(actions)
         sent.append(url)
@@ -89,7 +101,8 @@ def test_ensure_push_writes_both_slots_and_keeps_other_urls(monkeypatch, logged)
                  (pair.split("=", 1) for pair in q.split("&")) if k == "urls[]"]
         return json.dumps({"actions": {name: [{"index": 0, "urls": saved}]}})
     monkeypatch.setattr(MOD, "_http_get", fake_get)
-    _p()._ensure_push(RelayDev(1, "Garage Strip Lights", ip="192.168.1.28"))
+    _p()._ensure_push(RelayDev(1, "Garage Strip Lights", ip="192.168.1.28",
+                               props={"mac_address": "8CAAB5056390"}))
     assert len(sent) == 2
     assert "urls[]=" in sent[0] and "%5B%5D" not in sent[0], "brackets must be literal"
     on = MOD.urllib.parse.parse_qs(sent[0].split("?", 1)[1])
@@ -101,21 +114,30 @@ def test_ensure_push_writes_both_slots_and_keeps_other_urls(monkeypatch, logged)
 def test_an_answer_that_did_not_save_our_url_is_a_failure(monkeypatch, logged):
     """The device accepted a misread query and saved nothing: live, 27-09-2026."""
     actions = {"actions": {n: [{"index": 0, "enabled": True, "urls": []}] for n in MOD.PUSH_EVENTS}}
-    monkeypatch.setattr(MOD, "_http_get", lambda url, timeout=None: json.dumps(actions))
-    _p()._ensure_push(RelayDev(1, "Garage Strip Lights", ip="192.168.1.28"))
+    monkeypatch.setattr(MOD, "_http_get", lambda url, timeout=None: json.dumps(
+        {"mac": "8CAAB5056390"} if url.endswith("/shelly") else actions))
+    _p()._ensure_push(RelayDev(1, "Garage Strip Lights", ip="192.168.1.28",
+                               props={"mac_address": "8CAAB5056390"}))
     assert [lvl for lvl, _m in logged.lines] == ["WARNING", "WARNING"]
     assert not any("tells Indigo" in m for _l, m in logged.lines)
 
 
 def test_ensure_push_is_quiet_when_already_set(monkeypatch, logged):
     p = _p()
-    dev = RelayDev(1, "Garage Strip Lights", ip="192.168.1.28")
+    dev = RelayDev(1, "Garage Strip Lights", ip="192.168.1.28",
+                   props={"mac_address": "8CAAB5056390"})
     actions = {"actions": {n: [{"index": 0, "enabled": True,
                                 "urls": [p._push_url(dev, "on" if n == "out_on_url" else "off")]}]
                            for n in MOD.PUSH_EVENTS}}
     sent = []
-    monkeypatch.setattr(MOD, "_http_get", lambda url, timeout=None: json.dumps(actions)
-                        if url.endswith("/settings/actions") else sent.append(url))
+
+    def fake_get(url, timeout=None):
+        if url.endswith("/shelly"):
+            return json.dumps({"mac": "8CAAB5056390"})
+        if url.endswith("/settings/actions"):
+            return json.dumps(actions)
+        sent.append(url)
+    monkeypatch.setattr(MOD, "_http_get", fake_get)
     p._ensure_push(dev)
     assert sent == [] and logged.lines == []
 
@@ -168,9 +190,9 @@ def test_a_mac_is_learned_then_held_to(monkeypatch, logged):
     assert dev.pluginProps["mac_address"] == "8CAAB5056390"
     assert p._identity_ok(dev, "192.168.1.28", "AABBCC000001") is False
     assert dev.errorState == "wrong device" and p._wrong_device[1] == "AABBCC000001"
-    assert [lvl for lvl, _m in logged.lines] == ["WARNING"]
+    assert [lvl for lvl, _m in logged.lines] == ["INFO", "WARNING"], "learned at INFO (v1.6.1)"
     assert p._identity_ok(dev, "192.168.1.28", "AABBCC000001") is False
-    assert len(logged.lines) == 1, "said once"
+    assert len(logged.lines) == 2, "the warning is said once"
     assert p._identity_ok(dev, "192.168.1.28", "8CAAB5056390") is True
     assert 1 not in p._wrong_device
 
@@ -188,7 +210,7 @@ def test_a_device_is_found_again_by_its_mac(monkeypatch, logged):
     p = _p()
     dev = RelayDev(1, "Garage Strip Lights", ip="192.168.1.28",
                    props={"mac_address": "8CAAB5056390"})
-    monkeypatch.setattr(MOD.indigo, "devices", {1: dev})
+    monkeypatch.setattr(MOD.indigo, "devices", _Devs([dev]))
 
     def fake_get(url, timeout=None):
         if url == "http://192.168.1.40/shelly":
@@ -219,6 +241,7 @@ def _relay_poll(monkeypatch, relay, before, **p_over):
     p._fire_trigger = lambda t, d: fired.append((t, d))
     dev = RelayDev(1, "Garage Strip Lights")
     dev.states["onOffState"] = before
+    monkeypatch.setattr(MOD.indigo, "devices", _Devs([dev]))
     p._fetch_status = lambda d: {"relays": [relay]}
     p._update_relay(dev)
     return dev, fired
@@ -232,7 +255,7 @@ def test_the_wall_switch_fires_switched_outside_indigo(monkeypatch):
 
 def test_indigos_own_command_does_not(monkeypatch):
     dev, fired = _relay_poll(monkeypatch, {"ison": True, "source": "http"}, False,
-                             _last_command={1: MOD.time.time()})
+                             _last_command={1: MOD.time.time()}, _last_read={1: 0.0})
     assert dev.states["lastChangedBy"] == "Indigo" and fired == []
 
 

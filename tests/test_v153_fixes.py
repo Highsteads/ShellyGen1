@@ -34,6 +34,11 @@ def plugin():
     p._wrong_warned = set()
     p._relocate_at = {}
     p.triggers = []
+    # v1.6.1 state
+    p._state_lock = MOD.threading.Lock()
+    p._last_read = {}
+    p._push_at = {}
+    p._slot_warned = set()
     return p
 
 
@@ -54,6 +59,10 @@ class Dev:
 
     def updateStateOnServer(self, key, value, **k):
         self.states[key] = value
+
+    def updateStatesOnServer(self, kv):
+        for item in kv:
+            self.states[item["key"]] = item["value"]
 
 
 class _Log:

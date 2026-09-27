@@ -6,6 +6,11 @@
 		<CallbackMethod>menuToggleTimestamps</CallbackMethod>
 	</MenuItem>
 
+	<MenuItem id="menuAcceptReplaced">
+		<Name>Accept Replaced Shellys</Name>
+		<CallbackMethod>menuAcceptReplaced</CallbackMethod>
+	</MenuItem>
+
 	<MenuItem id="sep1" isSeparator="true"/>
 	<MenuItem id="showPluginInfo">
 		<Name>Show Plugin Info</Name>
