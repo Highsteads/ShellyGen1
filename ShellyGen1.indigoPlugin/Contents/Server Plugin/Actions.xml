@@ -1,11 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Actions>
 
-	<!-- Pulse relay on for 2 seconds then off (on-device Shelly timer).
+	<!-- Pulse relay on for N seconds (default 2) then off (on-device Shelly timer).
 	     Use for garage door openers that need a momentary contact closure. -->
 	<Action id="pulseRelay" deviceFilter="self.shellyRelay" uiPath="DeviceActions">
-		<Name>Pulse Relay (2 seconds)</Name>
+		<Name>Pulse Relay</Name>
 		<CallbackMethod>pulseRelay</CallbackMethod>
+		<ConfigUI>
+			<Field id="seconds" type="textfield" defaultValue="2">
+				<Label>Seconds:</Label>
+			</Field>
+			<Field id="hlp" type="label" fontSize="mini" alignWithControl="true">
+				<Label>The relay closes, then opens again after this long on the Shelly's own timer. 2 suits most garage door openers. Actions made before version 1.6 pulse for 2 seconds.</Label>
+			</Field>
+		</ConfigUI>
 	</Action>
 
 </Actions>

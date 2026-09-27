@@ -3,9 +3,25 @@
 # Filename:    plugin.py
 # Description: Shelly Gen 1 device integration for Indigo
 #              Supports: Shelly 1 relay (on/off + pulse), Shelly UNI ADC voltage
-# Author:      CliveS & Claude Fable 5.1; Claude Opus 5.5 (1.5.2, 1.5.3)
+# Author:      CliveS & Claude Fable 5.1; Claude Opus 5.5 (1.5.2 - 1.6.0)
 # Date:        27-09-2026
-# Version:     1.5.3
+# Version:     1.6.0
+#
+# v1.6.0 (27-09-2026): FULL REVIEW, the features.
+# * PUSH: each relay's out_on_url / out_off_url action (index 0) is pointed at a
+#   plugin listener (port 8179, path /shellyG1), keeping every URL that is not
+#   ours (merge_action_urls). A push must come from the device's own address;
+#   it sets onOffState at once and reads the relay back for who switched it.
+#   Re-checked every six hours. Pref push_enabled / indigo_server_ip (secrets
+#   first) / push_port.
+# * IDENTITY BY MAC: /status carries the MAC, so every poll checks it. Learned
+#   when missing; on a mismatch nothing is written, no command is sent, one
+#   warning, and the /24 is searched for the MAC (/shelly, throttled hourly,
+#   never for an Often Unpowered device that is merely away).
+# * lastChangedBy state + Switched Outside Indigo trigger from relays[0].source;
+#   an http change within 10 s of our command, or a timer-off inside our pulse,
+#   is Indigo.
+# * Pulse Relay takes its length from the action (default 2 s for older steps).
 #
 # v1.5.3 (27-09-2026): FULL REVIEW, the bug fixes.
 # * runConcurrentThread guards every device and every tick; one unexpected error
@@ -86,11 +102,16 @@
 import indigo
 import os as _os
 import sys as _sys
+import http.server
 import json
+import re
+import socketserver
 import threading
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 _sys.path.insert(0, _os.getcwd())
@@ -102,6 +123,22 @@ try:
     from plugin_utils import install_timestamp_filter
 except ImportError:
     install_timestamp_filter = None
+try:
+    from plugin_utils import as_bool
+except ImportError:
+    def as_bool(value, default=False):
+        if isinstance(value, bool):
+            return value
+        if value is None or value == "":
+            return default
+        return str(value).strip().lower() in ("true", "1", "yes", "on", "t")
+
+# Secrets first, the plugin's Configure dialog as the fallback (estate rule).
+_sys.path.insert(0, "/Library/Application Support/Perceptive Automation")
+try:
+    from IndigoSecrets import INDIGO_SERVER_IP as _SECRETS_INDIGO_IP
+except ImportError:
+    _SECRETS_INDIGO_IP = ""
 
 PLUGIN_ID   = "com.clives.indigoplugin.shellyg1"
 POLL_SECS   = 30
@@ -110,6 +147,70 @@ RETRY_DELAY  = 0.5        # seconds before the single retry on a failed GET
 FAIL_REMIND_EVERY = 60    # re-log a still-down device every Nth consecutive fail
 FAIL_WARN_AFTER   = 3     # v1.5.3: consecutive failed polls before a device is called down
 PULSE_REPOLL_SECS = 1.0   # v1.5.3: re-read a pulsed relay this long after its timer ends
+PULSE_DEFAULT_SECS = 2    # v1.6.0: the pulse length when an action does not say
+
+# ── v1.6.0: push from the device ────────────────────────────────────────────
+# A Gen 1 Shelly calls a URL when its relay switches (the "actions" in its own
+# settings). The plugin listens for those calls, so a change made at the wall or
+# in the Shelly app reaches Indigo at once instead of on the next 30-second poll.
+PUSH_PORT_DEFAULT = 8179  # ShellyDirect (Gen 2+) listens on 8178
+PUSH_PATH         = "/shellyG1"
+PUSH_EVENTS       = ("out_on_url", "out_off_url")
+PUSH_MAX_URLS     = 5     # a Gen 1 action holds at most five URLs
+PUSH_CHECK_SECS   = 6 * 3600
+COMMAND_WINDOW    = 10    # an http-sourced change this soon after our command was ours
+
+# ── v1.6.0: identity by MAC ──────────────────────────────────────────────────
+RELOCATE_EVERY    = 3600  # at most one address search per device per hour
+SCAN_TIMEOUT      = 0.6
+SCAN_WORKERS      = 32
+
+_SOURCE_LABELS = {
+    "input":    "the switch wired to the device",
+    "timer":    "the device's own timer",
+    "init":     "the device starting up",
+    "cloud":    "the Shelly app",
+    "schedule": "a schedule on the device",
+    "mqtt":     "another app on the network",
+    "coiot":    "another app on the network",
+    "ws_in":    "another app on the network",
+}
+
+
+def normalise_mac(value):
+    """Bare upper-case hex, or "" if it is not a MAC."""
+    cleaned = re.sub(r"[^0-9A-Fa-f]", "", str(value or "")).upper()
+    return cleaned if len(cleaned) == 12 else ""
+
+
+def switch_source_label(source, ours_recently=False):
+    """Who last changed a Gen 1 relay, in words. 'http' is Indigo when the
+    plugin sent a command moments before, otherwise some other app; an unknown
+    source is shown in quotes so a new one surfaces rather than vanishing."""
+    src = str(source or "").strip().lower()
+    if not src:
+        return ""
+    if src == "http":
+        return "Indigo" if ours_recently else "another app on the network"
+    return _SOURCE_LABELS.get(src, f'"{source}"')
+
+
+def plugin_push_url(url):
+    return PUSH_PATH + "?" in str(url or "")
+
+
+def merge_action_urls(existing, wanted):
+    """The URL list for one action slot: every URL that is not ours kept as it
+    is, our stale ones (another device id, an old address or port) dropped,
+    and ours added once. None when nothing needs to change."""
+    keep = [u for u in (existing or []) if not plugin_push_url(u)]
+    ours = [u for u in (existing or []) if plugin_push_url(u)]
+    if ours == [wanted]:
+        return None
+    urls = keep + [wanted]
+    if len(urls) > PUSH_MAX_URLS:
+        urls = keep[:PUSH_MAX_URLS - 1] + [wanted]
+    return urls
 
 # v1.5.2: states rewritten on every poll that carry no history worth keeping.
 # SQL Logger reads the comma-separated `sqlLoggerIgnoreStates` shared prop.
@@ -181,6 +282,27 @@ def _http_get_retry(url, timeout=HTTP_TIMEOUT):
     return body
 
 
+def action_query(name, urls):
+    """The query string for a Gen 1 /settings/actions write. The device only
+    reads `urls[]` with literal brackets -- encoded as %5B%5D it answers as
+    though it worked and changes nothing (measured on a Shelly 1, 1.14.0) --
+    while each URL itself must be fully encoded."""
+    parts = [f"index=0&name={urllib.parse.quote(name)}&enabled=true"]
+    parts += ["urls[]=" + urllib.parse.quote(u, safe="") for u in urls]
+    return "&".join(parts)
+
+
+def saved_action_urls(reply, name):
+    """The URLs the device reports for action `name` (index 0) after a write."""
+    try:
+        data = json.loads(reply or "")
+        slots = (data.get("actions") or {}).get(name) or []
+        slot = next((a for a in slots if a.get("index", 0) == 0), {})
+        return list(slot.get("urls") or [])
+    except (ValueError, AttributeError, TypeError):
+        return []
+
+
 class Plugin(indigo.PluginBase):
 
     def __init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs):
@@ -193,6 +315,21 @@ class Plugin(indigo.PluginBase):
         self._fail_state = {}   # {dev.id: consecutive poll-failure count} — log throttling
         self._no_ip_warned = set()   # device ids already told they have no address
 
+        # v1.6.0
+        self._load_push_prefs(pluginPrefs)
+        self.push_server   = None
+        # The start-up set-up is done per device in deviceStartComm; the first
+        # periodic check waits its full interval, or the two run together.
+        self._push_checked = time.time()
+        self._push_lock    = threading.Lock()
+        self._last_command = {}      # {dev.id: ts} of our last relay command
+        self._pulse_until  = {}      # {dev.id: ts} a pulse's own timer-off is ours
+        self._moved        = {}      # {dev.id: True} a push saw the relay change
+        self._wrong_device = {}      # {dev.id: MAC found instead} commands and writes refused
+        self._wrong_warned = set()
+        self._relocate_at  = {}      # {dev.id: ts} last address search
+        self.triggers      = []
+
         if install_timestamp_filter:
             self._ts_filter = install_timestamp_filter(self, enabled=self.timestamp_enabled)
         else:
@@ -204,24 +341,64 @@ class Plugin(indigo.PluginBase):
 
     def startup(self):
         self.logger.debug("startup()")
+        if self.push_enabled:
+            self._start_push_server()
 
     def shutdown(self):
         self.logger.debug("shutdown()")
+        if self.push_server:
+            try:
+                self.push_server.shutdown()
+                self.push_server.server_close()
+            except Exception as exc:
+                self.logger.debug(f"push listener shutdown: {exc}")
+
+    # ── Triggers (v1.6.0) ─────────────────────────────────────────────
+
+    def triggerStartProcessing(self, trigger):
+        self.triggers.append(trigger)
+
+    def triggerStopProcessing(self, trigger):
+        self.triggers = [t for t in self.triggers if t.id != trigger.id]
+
+    def _fire_trigger(self, type_id, dev_id):
+        for trigger in list(self.triggers):
+            if trigger.pluginTypeId != type_id:
+                continue
+            want = trigger.pluginProps.get("deviceId", "any")
+            if want and want != "any" and want != str(dev_id):
+                continue
+            try:
+                indigo.trigger.execute(trigger)
+            except Exception as exc:
+                log(f"trigger {trigger.name} failed: {exc}", level="WARNING")
+
+    def getRelayDevices(self, filter="", valuesDict=None, typeId="", targetId=0):
+        result = [("any", "Any Relay")]
+        for dev in sorted(indigo.devices.iter("self"), key=lambda d: d.name):
+            if dev.deviceTypeId == "shellyRelay":
+                result.append((str(dev.id), dev.name))
+        return result
 
     def deviceStartComm(self, dev):
         self.logger.debug(f"deviceStartComm: {dev.name}")
+        # v1.6.0: a device made before a state was added to Devices.xml does not
+        # have it until its state list is refreshed; writes to it are dropped.
+        dev.stateListOrDisplayStateIdChanged()
         self._keep_churn_out_of_sql_logger(dev)
         # v1.5.3: the first poll runs off the lifecycle thread. Done inline, a
         # device that does not answer (the Qashqai when the car is out) held up
         # plugin start-up for the full timeout and retry, over ten seconds.
-        threading.Thread(target=self._safe_update, args=(dev.id,), daemon=True).start()
+        threading.Thread(target=self._safe_update, args=(dev.id, True), daemon=True).start()
 
-    def _safe_update(self, dev_id):
+    def _safe_update(self, dev_id, set_up_push=False):
         """Poll one device by id, never letting an error escape a thread."""
         try:
             dev = indigo.devices[dev_id]
             if dev.enabled:
                 self._update_device(dev)
+                if set_up_push:
+                    self._ensure_push(indigo.devices[dev_id])
         except Exception as exc:
             self.logger.debug(f"poll of device {dev_id} failed: {exc}")
 
@@ -272,6 +449,9 @@ class Plugin(indigo.PluginBase):
                     raise
                 except Exception as exc:
                     log(f"poll loop error: {exc}", level="WARNING")
+                if self.push_enabled and (time.time() - self._push_checked) >= PUSH_CHECK_SECS:
+                    self._push_checked = time.time()
+                    threading.Thread(target=self._ensure_push_all, daemon=True).start()
                 self.sleep(POLL_SECS)
         except self.StopThread:
             pass
@@ -309,8 +489,83 @@ class Plugin(indigo.PluginBase):
         except json.JSONDecodeError:
             log(f"{dev.name}: invalid JSON from {ip}", level="WARNING")
             return None
+        if not isinstance(status, dict) or not self._identity_ok(dev, ip, status.get("mac")):
+            return None
         self._note_recovery(dev)
         return status
+
+    # ── Identity by MAC (v1.6.0) ──────────────────────────────────────
+
+    def _identity_ok(self, dev, ip, reported_mac):
+        """The box at this address must be the device we think it is.
+
+        A Gen 1 Shelly puts its MAC in every /status, so the check costs
+        nothing. A device with no MAC stored learns it here. On a mismatch
+        nothing is written and no command is sent, one warning names both
+        MACs, and the plugin looks for the device on the subnet. The same
+        fault in ShellyDirect once cross-wrote two plugs' energy readings.
+        """
+        found  = normalise_mac(reported_mac)
+        stored = normalise_mac(dev.pluginProps.get("mac_address", ""))
+        if not found:
+            return True                       # nothing to compare - trust the address
+        if not stored:
+            props = dict(dev.pluginProps)
+            props["mac_address"] = found
+            dev.replacePluginPropsOnServer(props)
+            self.logger.debug(f"{dev.name}: MAC {found} recorded")
+            return True
+        if found == stored:
+            if self._wrong_device.pop(dev.id, None):
+                self._wrong_warned.discard(dev.id)
+                log(f"{dev.name}: the right device is answering at {ip} again")
+            return True
+        self._wrong_device[dev.id] = found
+        if dev.id not in self._wrong_warned:
+            self._wrong_warned.add(dev.id)
+            dev.setErrorStateOnServer("wrong device")
+            log(f"{dev.name}: {ip} is answering as {found}, not {stored}. Nothing is recorded "
+                f"and no command is sent until the device is found again; looking for it "
+                f"on the network.", level="WARNING")
+        threading.Thread(target=self._relocate, args=(dev.id,), daemon=True).start()
+        return False
+
+    def _relocate(self, dev_id):
+        """Look for a device by MAC on its own /24. Throttled to once an hour
+        per device; a device marked Often Unpowered is only searched for when
+        another box has taken its address, never just for being away."""
+        try:
+            dev = indigo.devices[dev_id]
+        except KeyError:
+            return
+        now = time.time()
+        if now - self._relocate_at.get(dev_id, 0) < RELOCATE_EVERY:
+            return
+        self._relocate_at[dev_id] = now
+        mac = normalise_mac(dev.pluginProps.get("mac_address", ""))
+        ip  = dev.pluginProps.get("ip_address", "").strip()
+        parts = ip.split(".")
+        if not mac or len(parts) != 4:
+            return
+        subnet = ".".join(parts[:3])
+
+        def probe(host):
+            body = _http_get(f"http://{host}/shelly", timeout=SCAN_TIMEOUT)
+            if not body:
+                return None
+            try:
+                return host if normalise_mac(json.loads(body).get("mac")) == mac else None
+            except (ValueError, AttributeError):
+                return None
+
+        with ThreadPoolExecutor(max_workers=SCAN_WORKERS) as pool:
+            hits = [h for h in pool.map(probe, [f"{subnet}.{i}" for i in range(1, 255)]) if h]
+        if not hits or hits[0] == ip:
+            return
+        props = dict(dev.pluginProps)
+        props["ip_address"] = hits[0]
+        dev.replacePluginPropsOnServer(props)       # the address change restarts the device
+        log(f"{dev.name}: found at {hits[0]} by its MAC {mac} (was {ip}) - address updated")
 
     @staticmethod
     def _expected_absent(dev):
@@ -347,6 +602,10 @@ class Plugin(indigo.PluginBase):
             self.logger.debug(f"{dev.name}: no response from {ip} (poll {fails}, retrying)")
         elif fails == FAIL_WARN_AFTER:
             dev.setErrorStateOnServer("unreachable")
+            # v1.6.0: a device that is NOT often away may simply have a new
+            # address. Look for it by MAC (throttled, and never for a car).
+            if not self._expected_absent(dev) and dev.pluginProps.get("mac_address"):
+                threading.Thread(target=self._relocate, args=(dev.id,), daemon=True).start()
             log(f"{dev.name}: no response from {ip} for {fails} polls in a row — "
                 f"suppressing repeats until it recovers", level=level)
         elif fails % FAIL_REMIND_EVERY == 0:
@@ -370,11 +629,26 @@ class Plugin(indigo.PluginBase):
         if status is None:
             return
         try:
-            is_on = bool(status["relays"][0]["ison"])
+            relay = status["relays"][0]
+            is_on = bool(relay["ison"])
         except (KeyError, IndexError, TypeError):
             log(f"{dev.name}: unexpected relay status format", level="WARNING")
             return
-        dev.updateStateOnServer("onOffState", is_on)
+        # v1.6.0: who switched it, written only when it changes.
+        prev   = dev.states.get("onOffState")
+        moved  = self._moved.pop(dev.id, False) or (prev is not None and bool(prev) != is_on)
+        now    = time.time()
+        source = str(relay.get("source", "") or "")
+        ours   = (now - self._last_command.get(dev.id, 0) < COMMAND_WINDOW
+                  or (source.lower() == "timer" and now < self._pulse_until.get(dev.id, 0)))
+        who = "Indigo" if (ours and source.lower() in ("http", "timer")) else switch_source_label(source)
+        kv = [{"key": "onOffState", "value": is_on}]
+        if who and who != dev.states.get("lastChangedBy"):
+            kv.append({"key": "lastChangedBy", "value": who})
+        dev.updateStatesOnServer(kv)
+        if moved and who and who != "Indigo":
+            self._log_activity(f'"{dev.name}" turned {"on" if is_on else "off"} by {who}')
+            self._fire_trigger("switchedOutsideIndigo", dev.id)
         if self.debug:
             log(f"{dev.name}: {'ON' if is_on else 'OFF'}")
 
@@ -433,7 +707,18 @@ class Plugin(indigo.PluginBase):
             # v1.5.3: Send Status Request used to do nothing at all on a relay.
             self._update_device(dev)
 
+    def _refuse_wrong_device(self, dev):
+        found = self._wrong_device.get(dev.id)
+        if found:
+            log(f"{dev.name}: command not sent - the Shelly at its address is {found}, "
+                f"not this device", level="ERROR")
+            return True
+        return False
+
     def _relay_cmd(self, dev, ip, turn):
+        if self._refuse_wrong_device(dev):
+            return
+        self._last_command[dev.id] = time.time()
         body = _http_get_retry(f"http://{ip}/relay/0?turn={turn}")
         if body is None:
             log(f"{dev.name}: relay command '{turn}' failed — no response from {ip}", level="ERROR")
@@ -458,7 +743,17 @@ class Plugin(indigo.PluginBase):
         if not ip:
             log(f"{dev.name}: no IP configured", level="ERROR")
             return
-        seconds = 2
+        if self._refuse_wrong_device(dev):
+            return
+        # v1.6.0: the length comes from the action; older actions carry none.
+        try:
+            seconds = float(str(action.props.get("seconds", PULSE_DEFAULT_SECS)).strip())
+        except (TypeError, ValueError, AttributeError):
+            seconds = PULSE_DEFAULT_SECS
+        seconds = max(0.5, min(seconds, 3600))
+        seconds = int(seconds) if seconds == int(seconds) else seconds
+        self._last_command[dev.id] = time.time()
+        self._pulse_until[dev.id] = time.time() + seconds + COMMAND_WINDOW
         body = _http_get_retry(f"http://{ip}/relay/0?turn=on&timer={seconds}")
         if body is None:
             log(f"{dev.name}: pulse failed — no response from {ip}", level="ERROR")
@@ -501,6 +796,36 @@ class Plugin(indigo.PluginBase):
         if not userCancelled:
             self.debug = valuesDict.get("showDebugInfo", False)
             self.log_activity = bool(valuesDict.get("logActivityToEventLog", False))
+            old = (self.push_enabled, self.push_port, self.server_ip)
+            self._load_push_prefs(valuesDict)
+            if (self.push_enabled, self.push_port, self.server_ip) != old:
+                log("Push settings changed - reload the plugin to apply them")
+
+    def validatePrefsConfigUi(self, valuesDict):
+        errors = indigo.Dict()
+        try:
+            port = int(str(valuesDict.get("push_port", PUSH_PORT_DEFAULT)).strip())
+            if not 1024 <= port <= 65535:
+                raise ValueError
+        except ValueError:
+            errors["push_port"] = "Enter a port from 1024 to 65535 (8179 unless it is taken)."
+        ip = str(valuesDict.get("indigo_server_ip", "")).strip()
+        if ip:
+            parts = ip.split(".")
+            if len(parts) != 4 or not all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+                errors["indigo_server_ip"] = "That is not an IPv4 address (e.g. 192.168.1.5)."
+        return (len(errors) == 0), valuesDict, errors
+
+    def validateActionConfigUi(self, valuesDict, typeId, devId):
+        errors = indigo.Dict()
+        if typeId == "pulseRelay":
+            try:
+                secs = float(str(valuesDict.get("seconds", "")).strip())
+                if not 0.5 <= secs <= 3600:
+                    raise ValueError
+            except ValueError:
+                errors["seconds"] = "Enter a number of seconds from 0.5 to 3600."
+        return (len(errors) == 0), valuesDict, errors
 
     def validateDeviceConfigUi(self, valuesDict, typeId, devId):
         """v1.5.3: an address is required and must look like one. A device saved
@@ -515,3 +840,131 @@ class Plugin(indigo.PluginBase):
         else:
             valuesDict["ip_address"] = ip
         return (len(errors) == 0), valuesDict, errors
+
+    # ── Push from the device (v1.6.0) ─────────────────────────────────
+
+    def _load_push_prefs(self, prefs):
+        self.push_enabled = as_bool(prefs.get("push_enabled"), True)
+        self.server_ip = (_SECRETS_INDIGO_IP or str(prefs.get("indigo_server_ip", "") or "")).strip()
+        try:
+            self.push_port = int(str(prefs.get("push_port", PUSH_PORT_DEFAULT)).strip())
+        except (TypeError, ValueError):
+            self.push_port = PUSH_PORT_DEFAULT
+
+    def _push_url(self, dev, turn):
+        return (f"http://{self.server_ip}:{self.push_port}{PUSH_PATH}"
+                f"?devId={dev.id}&ev={turn}")
+
+    def _ensure_push_all(self):
+        for dev in indigo.devices.iter("self"):
+            if dev.enabled:
+                try:
+                    self._ensure_push(dev)
+                except Exception as exc:
+                    self.logger.debug(f"{dev.name}: push check failed: {exc}")
+
+    def _ensure_push(self, dev):
+        """Point the relay's on and off actions at the plugin, keeping any URL
+        that is not ours. Quiet when nothing needs changing. One at a time:
+        two overlapping runs read the same list and both wrote it."""
+        if not self.push_enabled or dev.deviceTypeId != "shellyRelay":
+            return
+        with self._push_lock:
+            self._ensure_push_locked(dev)
+
+    def _ensure_push_locked(self, dev):
+        if not self.server_ip:
+            if "push_no_ip" not in self._wrong_warned:
+                self._wrong_warned.add("push_no_ip")
+                log("Push updates need the Indigo server's address: set it in Plugins -> "
+                    "Shelly Gen 1 -> Configure, or INDIGO_SERVER_IP in IndigoSecrets.py",
+                    level="WARNING")
+            return
+        if dev.id in self._wrong_device:
+            return
+        ip = dev.pluginProps.get("ip_address", "").strip()
+        body = _http_get(f"http://{ip}/settings/actions") if ip else None
+        if not body:
+            return
+        try:
+            actions = json.loads(body).get("actions", {})
+        except (ValueError, AttributeError):
+            return
+        changed = []
+        for name in PUSH_EVENTS:
+            slot = next((a for a in actions.get(name, []) if a.get("index", 0) == 0), None)
+            if slot is None:
+                continue
+            want = self._push_url(dev, "on" if name == "out_on_url" else "off")
+            urls = merge_action_urls(slot.get("urls", []), want)
+            if urls is None and slot.get("enabled"):
+                continue
+            urls = urls if urls is not None else slot.get("urls", [])
+            resp = _http_get(f"http://{ip}/settings/actions?" + action_query(name, urls))
+            # The reply carries the list as saved. Believe that, not the fact
+            # that it answered: a query the device misread was accepted and
+            # changed nothing (found live while building this).
+            if want not in saved_action_urls(resp, name):
+                log(f"{dev.name}: could not set its {name} push address", level="WARNING")
+                continue
+            changed.append(name)
+        if changed:
+            log(f"{dev.name}: now tells Indigo the moment it switches")
+
+    def _start_push_server(self):
+        plugin = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                try:
+                    code = plugin._handle_push(self.path, self.client_address[0])
+                except Exception as exc:
+                    plugin.logger.debug(f"push handler: {exc}")
+                    code = 500
+                self.send_response(code)
+                self.end_headers()
+
+            def log_message(self, fmt, *args):
+                pass
+
+        class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+            allow_reuse_address = True
+
+        try:
+            self.push_server = Server(("", self.push_port), Handler)
+            threading.Thread(target=self.push_server.serve_forever, daemon=True).start()
+            self.logger.debug(f"push listener on port {self.push_port}")
+        except OSError as exc:
+            self.push_server = None
+            log(f"Could not listen for push updates on port {self.push_port} ({exc}). "
+                f"Devices are polled every 30 seconds meanwhile; choose another port in "
+                f"Plugins -> Shelly Gen 1 -> Configure.", level="WARNING")
+
+    def _handle_push(self, path, sender):
+        """One push from a device. The sender must be the device it names."""
+        parts = urllib.parse.urlparse(path)
+        if parts.path != PUSH_PATH:
+            return 404
+        query = urllib.parse.parse_qs(parts.query)
+        try:
+            dev_id = int(query.get("devId", ["0"])[0])
+            dev = indigo.devices[dev_id]
+        except (ValueError, KeyError):
+            return 404
+        if dev.pluginId != PLUGIN_ID or dev.deviceTypeId != "shellyRelay":
+            return 404
+        if dev.pluginProps.get("ip_address", "").strip() != sender:
+            self.logger.debug(f"push for {dev.name} from {sender} ignored (not its address)")
+            return 409
+        turn = query.get("ev", [""])[0]
+        if turn not in ("on", "off"):
+            return 400
+        is_on = turn == "on"
+        if bool(dev.states.get("onOffState")) != is_on:
+            self._moved[dev.id] = True
+        dev.updateStateOnServer("onOffState", is_on)
+        # Read the relay straight back: it says who switched it.
+        threading.Thread(target=self._safe_update, args=(dev.id,), daemon=True).start()
+        return 200
+

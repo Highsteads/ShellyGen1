@@ -9,6 +9,26 @@
 	</Field>
 
 
+	<Field id="sepPush" type="separator"/>
+	<Field id="push_enabled" type="checkbox" defaultValue="true">
+		<Label>Instant Updates from Relays:</Label>
+	</Field>
+	<Field id="hlpPush" type="label" fontSize="mini" alignWithControl="true">
+		<Label>Each relay is set to tell Indigo the moment it switches (its own "actions" settings), so a change at the wall or in the Shelly app shows at once instead of within 30 seconds. Any other addresses you have set in those actions are kept. Reload the plugin after changing this.</Label>
+	</Field>
+	<Field id="indigo_server_ip" type="textfield" defaultValue="">
+		<Label>Indigo Server IP:</Label>
+	</Field>
+	<Field id="hlpServerIp" type="label" fontSize="mini" alignWithControl="true">
+		<Label>The address your Shellys use to reach this Mac. Read from INDIGO_SERVER_IP in IndigoSecrets.py first; this field is the fallback.</Label>
+	</Field>
+	<Field id="push_port" type="textfield" defaultValue="8179">
+		<Label>Listening Port:</Label>
+	</Field>
+	<Field id="hlpPushPort" type="label" fontSize="mini" alignWithControl="true">
+		<Label>Change only if something else already uses 8179 (Shelly Direct uses 8178), then reload the plugin.</Label>
+	</Field>
+
 	<Field id="sep1" type="separator"/>
 	<Field id="logActivityToEventLog" type="checkbox" defaultValue="false">
 		<Label>Show Device Activity in the Indigo Event Log:</Label>

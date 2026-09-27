@@ -49,6 +49,9 @@ class FakeDev:
         self.batches = []
         self.singles = []
 
+    def stateListOrDisplayStateIdChanged(self):
+        pass
+
     def replaceSharedPropsOnServer(self, props):
         self.sharedProps = dict(props)
         self.shared_writes += 1
@@ -124,5 +127,5 @@ def test_a_failed_write_does_not_stop_the_device(monkeypatch):
     monkeypatch.setattr(MOD.threading, "Thread", _InlineThread)
     monkeypatch.setattr(MOD.indigo, "devices", {dev.id: dev})
     p.deviceStartComm(dev)
-    assert started == [(dev.id,)]
+    assert started == [(dev.id, True)], "first poll, then push set-up (v1.6.0)"
     assert polled == [dev]

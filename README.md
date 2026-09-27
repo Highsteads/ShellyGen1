@@ -9,15 +9,17 @@ Indigo plugin for older Shelly Gen 1 devices — relay and UNI ADC control over 
 
 *Developed and tested on Indigo 2025.2 / Python 3.13. Older Indigo releases that meet the minimum API version above should also work — the API floor is what Indigo's plugin loader actually checks.*
 **Bundle ID:** `com.clives.indigoplugin.shellyg1`
-**Version:** 1.5.3
+**Version:** 1.6.0
 
 ---
 
 ## Features
 
 - Talks to each Shelly straight over the local network with plain HTTP — no cloud account, no MQTT broker, nothing in between
-- Polls every device every 30 seconds and keeps its Indigo state in step
-- **Pulse Relay (2 seconds)** action — the relay closes and opens again on the Shelly's own timer, so a garage-door opener still gets its momentary contact even if Indigo is busy
+- Relays tell Indigo the moment they switch, and every device is also polled every 30 seconds as a backstop
+- Each device is known by its MAC address, so a DHCP change or another Shelly on its old address cannot mix them up
+- **Pulse Relay** action — the relay closes and opens again after the number of seconds you choose, on the Shelly's own timer, so a garage-door opener still gets its momentary contact even if Indigo is busy
+- **Last Switched By** state and a **Switched Outside Indigo** trigger
 - One quick retry, and three missed checks in a row, before a device is called unreachable; a device that has gone away is logged once on the way down and once on the way back rather than on every poll, so a flaky ESP8266 cannot flood the event log
 - The Indigo error state clears itself when the device answers again
 - Millisecond log timestamps, with a menu item to turn the prefix off
@@ -26,7 +28,7 @@ Indigo plugin for older Shelly Gen 1 devices — relay and UNI ADC control over 
 
 | Indigo device type | Shelly hardware | What you get |
 |--------------------|-----------------|--------------|
-| **Shelly Relay (Gen 1)** (`shellyRelay`) | Shelly 1 and other Gen 1 relays | On, off and toggle from the standard Indigo controls, plus the Pulse Relay action |
+| **Shelly Relay (Gen 1)** (`shellyRelay`) | Shelly 1 and other Gen 1 relays | On, off and toggle from the standard Indigo controls, the Pulse Relay action, instant updates, and who last switched it |
 | **Shelly UNI ADC (Gen 1)** (`shellyUniADC`) | Shelly UNI | The voltage on the UNI's analogue input as the device's display state — a car or leisure battery, say — with the time it was last read |
 
 ---
@@ -94,6 +96,12 @@ ShellyGen1.indigoPlugin/
 ```
 
 ## Changelog
+
+**v1.6.0** — **New features from the review.**
+- **Instant updates from relays.** Each relay is set to tell Indigo the moment it switches, so a change at the wall switch or in the Shelly app shows straight away instead of within 30 seconds. The plugin adds its own address to the relay's on and off actions and keeps any others you have set there. A push is only believed if it comes from that relay's own address. Set the Indigo Server IP in the plugin settings, or INDIGO_SERVER_IP in IndigoSecrets.py.
+- **Each device is known by its MAC address.** If another Shelly takes a device's address, the plugin records nothing from it and sends it no commands, says so once, and looks for the right device on the network. If it finds it at a new address it updates the device itself. A device marked Often Unpowered is never searched for just for being away.
+- **Last Switched By.** Each relay has a new state saying who last switched it: Indigo, the switch wired to it, the Shelly app, its own timer, or the device starting up after a power cut. A new **Switched Outside Indigo** trigger fires when anything but Indigo changes it.
+- **Pulse Relay has a length.** Set how many seconds in the action. If you made a Pulse Relay step with an earlier version, open it and click OK once so Indigo stores the new setting; until then it pulses for 2 seconds as before.
 
 **v1.5.3** — **A full review, and the fixes that came out of it.**
 - **Polling keeps going whatever happens.** One unexpected error used to stop all polling until the plugin was restarted.

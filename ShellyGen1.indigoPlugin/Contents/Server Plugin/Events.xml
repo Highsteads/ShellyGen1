@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Events>
+
+	<!-- Fires when a relay changes and the change did not come from Indigo:
+	     the switch wired to the Shelly, the Shelly app, its own timer, or the
+	     device starting up after a power cut. Last Switched By says which. -->
+	<Event id="switchedOutsideIndigo">
+		<Name>Switched Outside Indigo</Name>
+		<ConfigUI>
+			<Field id="deviceId" type="menu" defaultValue="any">
+				<Label>Relay:</Label>
+				<List class="self" filter="" method="getRelayDevices"/>
+			</Field>
+		</ConfigUI>
+	</Event>
+
+</Events>

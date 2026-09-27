@@ -18,6 +18,13 @@
 				<Label>Tick for a device that is away or switched off much of the time — a car, or an appliance plug that is off at the wall between uses. Not answering is then treated as normal and logged quietly. The device still shows as unreachable in the device list and still carries an error state, so anything watching device health can still see it: this quietens the log, it does not hide the device.</Label>
 			</Field>
 		</ConfigUI>
+		<States>
+			<State id="lastChangedBy">
+				<ValueType>String</ValueType>
+				<TriggerLabel>Last Switched By</TriggerLabel>
+				<ControlPageLabel>Switched By</ControlPageLabel>
+			</State>
+		</States>
 	</Device>
 
 	<!-- shellyUniADC - Shelly UNI ADC voltage input (car battery) -->

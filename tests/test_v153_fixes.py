@@ -24,6 +24,16 @@ def plugin():
     p._fail_state = {}
     p._no_ip_warned = set()
     p.log_activity = False
+    # v1.6.0 state
+    p.push_enabled = False
+    p._push_checked = 0.0
+    p._last_command = {}
+    p._pulse_until = {}
+    p._moved = {}
+    p._wrong_device = {}
+    p._wrong_warned = set()
+    p._relocate_at = {}
+    p.triggers = []
     return p
 
 
