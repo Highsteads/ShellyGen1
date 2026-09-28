@@ -92,7 +92,7 @@ def test_ensure_push_writes_both_slots_and_keeps_other_urls(monkeypatch, logged)
 
     def fake_get(url, timeout=None):
         if url.endswith("/shelly"):
-            return json.dumps({"mac": "8CAAB5056390"})
+            return json.dumps({"mac": "AABBCC000002"})
         if url.endswith("/settings/actions"):
             return json.dumps(actions)
         sent.append(url)
@@ -104,7 +104,7 @@ def test_ensure_push_writes_both_slots_and_keeps_other_urls(monkeypatch, logged)
         return json.dumps({"actions": {name: [{"index": 0, "urls": saved}]}})
     monkeypatch.setattr(MOD, "_http_get", fake_get)
     _p()._ensure_push(RelayDev(1, "Garage Strip Lights", ip="192.168.1.28",
-                               props={"mac_address": "8CAAB5056390"}))
+                               props={"mac_address": "AABBCC000002"}))
     assert len(sent) == 2
     assert "urls[]=" in sent[0] and "%5B%5D" not in sent[0], "brackets must be literal"
     on = MOD.urllib.parse.parse_qs(sent[0].split("?", 1)[1])
@@ -117,9 +117,9 @@ def test_an_answer_that_did_not_save_our_url_is_a_failure(monkeypatch, logged):
     """The device accepted a misread query and saved nothing: live, 27-09-2026."""
     actions = {"actions": {n: [{"index": 0, "enabled": True, "urls": []}] for n in MOD.PUSH_EVENTS}}
     monkeypatch.setattr(MOD, "_http_get", lambda url, timeout=None: json.dumps(
-        {"mac": "8CAAB5056390"} if url.endswith("/shelly") else actions))
+        {"mac": "AABBCC000002"} if url.endswith("/shelly") else actions))
     _p()._ensure_push(RelayDev(1, "Garage Strip Lights", ip="192.168.1.28",
-                               props={"mac_address": "8CAAB5056390"}))
+                               props={"mac_address": "AABBCC000002"}))
     assert [lvl for lvl, _m in logged.lines] == ["WARNING", "WARNING"]
     assert not any("tells Indigo" in m for _l, m in logged.lines)
 
@@ -127,7 +127,7 @@ def test_an_answer_that_did_not_save_our_url_is_a_failure(monkeypatch, logged):
 def test_ensure_push_is_quiet_when_already_set(monkeypatch, logged):
     p = _p()
     dev = RelayDev(1, "Garage Strip Lights", ip="192.168.1.28",
-                   props={"mac_address": "8CAAB5056390"})
+                   props={"mac_address": "AABBCC000002"})
     actions = {"actions": {n: [{"index": 0, "enabled": True,
                                 "urls": [p._push_url(dev, "on" if n == "out_on_url" else "off")]}]
                            for n in MOD.PUSH_EVENTS}}
@@ -135,7 +135,7 @@ def test_ensure_push_is_quiet_when_already_set(monkeypatch, logged):
 
     def fake_get(url, timeout=None):
         if url.endswith("/shelly"):
-            return json.dumps({"mac": "8CAAB5056390"})
+            return json.dumps({"mac": "AABBCC000002"})
         if url.endswith("/settings/actions"):
             return json.dumps(actions)
         sent.append(url)
@@ -188,14 +188,14 @@ def test_a_mac_is_learned_then_held_to(monkeypatch, logged):
     monkeypatch.setattr(MOD.threading, "Thread", lambda target=None, args=(), daemon=None:
                         types.SimpleNamespace(start=lambda: None))
     dev = RelayDev(1, "Garage Strip Lights", ip="192.168.1.28")
-    assert p._identity_ok(dev, "192.168.1.28", "8C:AA:B5:05:63:90") is True
-    assert dev.pluginProps["mac_address"] == "8CAAB5056390"
+    assert p._identity_ok(dev, "192.168.1.28", "AA:BB:CC:00:00:02") is True
+    assert dev.pluginProps["mac_address"] == "AABBCC000002"
     assert p._identity_ok(dev, "192.168.1.28", "AABBCC000001") is False
     assert dev.errorState == "wrong device" and p._wrong_device[1] == "AABBCC000001"
     assert [lvl for lvl, _m in logged.lines] == ["INFO", "WARNING"], "learned at INFO (v1.6.1)"
     assert p._identity_ok(dev, "192.168.1.28", "AABBCC000001") is False
     assert len(logged.lines) == 2, "the warning is said once"
-    assert p._identity_ok(dev, "192.168.1.28", "8CAAB5056390") is True
+    assert p._identity_ok(dev, "192.168.1.28", "AABBCC000002") is True
     assert 1 not in p._wrong_device
 
 
@@ -211,12 +211,12 @@ def test_no_command_goes_to_the_wrong_device(monkeypatch, logged):
 def test_a_device_is_found_again_by_its_mac(monkeypatch, logged):
     p = _p()
     dev = RelayDev(1, "Garage Strip Lights", ip="192.168.1.28",
-                   props={"mac_address": "8CAAB5056390"})
+                   props={"mac_address": "AABBCC000002"})
     monkeypatch.setattr(MOD.indigo, "devices", _Devs([dev]))
 
     def fake_get(url, timeout=None):
         if url == "http://192.168.1.40/shelly":
-            return json.dumps({"mac": "8CAAB5056390"})
+            return json.dumps({"mac": "AABBCC000002"})
         return None
     monkeypatch.setattr(MOD, "_http_get", fake_get)
     p._relocate(1)

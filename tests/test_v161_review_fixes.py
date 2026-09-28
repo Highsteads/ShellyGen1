@@ -32,15 +32,15 @@ def logged(monkeypatch):
 # ── H1: copied or re-pointed devices ─────────────────────────────────────────
 
 def test_a_new_address_forgets_the_old_mac(monkeypatch):
-    dev = RelayDev(1, "Porch Relay", ip="192.168.1.28", props={"mac_address": "8CAAB5056390"})
+    dev = RelayDev(1, "Porch Relay", ip="192.168.1.28", props={"mac_address": "AABBCC000002"})
     monkeypatch.setattr(MOD.indigo, "devices", _Devs([dev]))
     monkeypatch.setattr(MOD.indigo, "Dict", dict, raising=False)
     ok, values, _e = plugin().validateDeviceConfigUi(
-        {"ip_address": "192.168.1.30", "mac_address": "8CAAB5056390"}, "shellyRelay", 1)
+        {"ip_address": "192.168.1.30", "mac_address": "AABBCC000002"}, "shellyRelay", 1)
     assert ok and values["mac_address"] == ""
     ok, values, _e = plugin().validateDeviceConfigUi(
-        {"ip_address": "192.168.1.28", "mac_address": "8CAAB5056390"}, "shellyRelay", 1)
-    assert ok and values["mac_address"] == "8CAAB5056390", "same address keeps its MAC"
+        {"ip_address": "192.168.1.28", "mac_address": "AABBCC000002"}, "shellyRelay", 1)
+    assert ok and values["mac_address"] == "AABBCC000002", "same address keeps its MAC"
 
 
 def test_two_relays_cannot_share_a_shelly(monkeypatch):
@@ -55,11 +55,11 @@ def test_two_relays_cannot_share_a_shelly(monkeypatch):
 
 
 def test_a_search_never_moves_a_device_onto_anothers_address(monkeypatch, logged):
-    garage = RelayDev(1, "Garage Relay", ip="192.168.1.28", props={"mac_address": "8CAAB5056390"})
-    copy = RelayDev(2, "Porch Relay", ip="192.168.1.30", props={"mac_address": "8CAAB5056390"})
+    garage = RelayDev(1, "Garage Relay", ip="192.168.1.28", props={"mac_address": "AABBCC000002"})
+    copy = RelayDev(2, "Porch Relay", ip="192.168.1.30", props={"mac_address": "AABBCC000002"})
     monkeypatch.setattr(MOD.indigo, "devices", _Devs([garage, copy]))
     monkeypatch.setattr(MOD, "_http_get", lambda url, timeout=None: json.dumps(
-        {"mac": "8CAAB5056390"}) if url == "http://192.168.1.28/shelly" else None)
+        {"mac": "AABBCC000002"}) if url == "http://192.168.1.28/shelly" else None)
     _p()._relocate(2)
     assert copy.pluginProps["ip_address"] == "192.168.1.30"
     assert "Garage Relay" in logged.lines[-1][1]
@@ -159,14 +159,14 @@ def test_push_setup_checks_identity_first(monkeypatch):
     sent = []
     monkeypatch.setattr(MOD, "_http_get", lambda url, timeout=None: json.dumps(
         {"mac": "AABBCC000001"}) if url.endswith("/shelly") else sent.append(url))
-    _p()._ensure_push(RelayDev(1, "Garage", ip="192.168.1.28", props={"mac_address": "8CAAB5056390"}))
+    _p()._ensure_push(RelayDev(1, "Garage", ip="192.168.1.28", props={"mac_address": "AABBCC000002"}))
     assert sent == [], "another box at the address gets nothing written to it"
 
 
 # ── M1: a replaced Shelly ────────────────────────────────────────────────────
 
 def test_a_replaced_shelly_can_be_accepted(monkeypatch, logged):
-    dev = RelayDev(1, "Garage Strip Lights", ip="192.168.1.28", props={"mac_address": "8CAAB5056390"})
+    dev = RelayDev(1, "Garage Strip Lights", ip="192.168.1.28", props={"mac_address": "AABBCC000002"})
     dev.errorState = "wrong device"
     monkeypatch.setattr(MOD.indigo, "devices", _Devs([dev]))
     p = _p()
@@ -217,7 +217,7 @@ def _slot_run(monkeypatch, slot):
 
     def fake_get(url, timeout=None):
         if url.endswith("/shelly"):
-            return json.dumps({"mac": "8CAAB5056390"})
+            return json.dumps({"mac": "AABBCC000002"})
         if url.endswith("/settings/actions"):
             return json.dumps(actions)
         writes.append(url)
@@ -228,7 +228,7 @@ def _slot_run(monkeypatch, slot):
         return json.dumps({"actions": {name: [{"index": 0, "urls": saved}]}})
     monkeypatch.setattr(MOD, "_http_get", fake_get)
     p = _p()
-    dev = RelayDev(1, "Garage", ip="192.168.1.28", props={"mac_address": "8CAAB5056390"})
+    dev = RelayDev(1, "Garage", ip="192.168.1.28", props={"mac_address": "AABBCC000002"})
     p._ensure_push(dev)
     p._ensure_push(dev)
     return writes
